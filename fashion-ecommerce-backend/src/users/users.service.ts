@@ -1,0 +1,96 @@
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, Like } from 'typeorm';
+import * as bcrypt from 'bcryptjs';
+import { User } from './entities/user.entity';
+import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+
+@Injectable()
+export class UsersService {
+  constructor(
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+  ) {}
+
+  async findAll(page: number = 1, limit: number = 10, search?: string) {
+    const skip = (page - 1) * limit;
+    const where = search ? [
+      { email: Like(`%${search}%`) },
+    ] : {};
+
+    const [users, total] = await this.userRepository.findAndCount({
+      where,
+      skip,
+      take: limit,
+      order: { created_at: 'DESC' },
+    });
+
+    return {
+      data: users,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findOne(id: number) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    return user;
+  }
+
+  async findByEmail(email: string) {
+    return this.userRepository.findOne({ where: { email } });
+  }
+
+  async create(createUserDto: CreateUserDto) {
+    const existingUser = await this.userRepository.findOne({
+      where: [
+        { email: createUserDto.email },
+      ],
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    const user = this.userRepository.create({
+      email: createUserDto.email,
+      password: hashedPassword,
+      user_type: createUserDto.user_type,
+    });
+
+    return this.userRepository.save(user);
+  }
+
+  async update(id: number, updateUserDto: UpdateUserDto) {
+    const user = await this.findOne(id);
+    
+    if (updateUserDto.password) {
+      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
+    }
+
+    // Only update allowed fields
+    const updateData: any = {};
+    if (updateUserDto.email) updateData.email = updateUserDto.email;
+    if (updateUserDto.password) updateData.password = updateUserDto.password;
+    if (updateUserDto.user_type) updateData.user_type = updateUserDto.user_type;
+    if (updateUserDto.is_verified !== undefined) updateData.is_verified = updateUserDto.is_verified;
+    if (updateUserDto.is_active !== undefined) updateData.is_active = updateUserDto.is_active;
+
+    Object.assign(user, updateData);
+    return this.userRepository.save(user);
+  }
+
+  async remove(id: number) {
+    const user = await this.findOne(id);
+    await this.userRepository.remove(user);
+    return { message: 'User deleted successfully' };
+  }
+} 
