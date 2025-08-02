@@ -93,4 +93,10 @@ export class UsersService {
     await this.userRepository.remove(user);
     return { message: 'User deleted successfully' };
   }
+
+  async updateLastLogin(id: number) {
+    const user = await this.findOne(id);
+    user.last_login = new Date();
+    return this.userRepository.save(user);
+  }
 } 

@@ -34,18 +34,61 @@ export class AuthController {
   @Post('register')
   @Public()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'User registration' })
+  @ApiOperation({ summary: 'Customer registration (public)' })
   @ApiResponse({ 
     status: 201, 
     description: 'Registration successful', 
     type: AuthResponseDto 
   })
   @ApiResponse({ status: 409, description: 'User already exists' })
+  @ApiResponse({ status: 403, description: 'Only customers can register publicly' })
   async register(@Body() registerDto: RegisterDto): Promise<AuthResponseDto> {
     return this.authService.register(
       registerDto.email,
       registerDto.password,
       registerDto.user_type,
+    );
+  }
+
+  @Post('admin/create-admin')
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create admin user (admin only)' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Admin user created successfully'
+  })
+  @ApiResponse({ status: 403, description: 'Only admins can create admin users' })
+  @ApiResponse({ status: 409, description: 'User already exists' })
+  async createAdminUser(
+    @Body() body: { email: string; password: string },
+    @CurrentUser() user: any
+  ) {
+    return this.authService.createAdminUser(
+      body.email,
+      body.password,
+      user.id,
+    );
+  }
+
+  @Post('admin/create-brand')
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create brand user (admin only)' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Brand user created successfully'
+  })
+  @ApiResponse({ status: 403, description: 'Only admins can create brand users' })
+  @ApiResponse({ status: 409, description: 'User already exists' })
+  async createBrandUser(
+    @Body() body: { email: string; password: string },
+    @CurrentUser() user: any
+  ) {
+    return this.authService.createBrandUser(
+      body.email,
+      body.password,
+      user.id,
     );
   }
 
