@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { SizesService } from './sizes.service';
 import { CreateSizeDto, UpdateSizeDto, SizeResponseDto } from './dto/size.dto';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Sizes')
 @Controller('sizes')
@@ -9,6 +10,7 @@ export class SizesController {
   constructor(private readonly sizesService: SizesService) {}
 
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Get all sizes' })
   @ApiResponse({ status: 200, description: 'List of sizes', type: [SizeResponseDto] })
   async findAll() {
@@ -16,6 +18,7 @@ export class SizesController {
   }
 
   @Get(':id')
+  @Public()
   @ApiOperation({ summary: 'Get size by ID' })
   @ApiParam({ name: 'id', description: 'Size ID', example: 1 })
   @ApiResponse({ status: 200, description: 'Size details', type: SizeResponseDto })

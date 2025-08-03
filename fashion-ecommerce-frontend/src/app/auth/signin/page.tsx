@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import { Check, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import GoogleSignInButton from "@/components/auth/google-signin-button";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -18,6 +19,40 @@ export default function SignInPage() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Check for OAuth errors in URL params
+  React.useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const error = urlParams.get('error');
+    
+    if (error) {
+      switch (error) {
+        case 'google_auth_failed':
+          toast.error('Google authentication failed. Please try again.');
+          break;
+        case 'no_auth_code':
+          toast.error('No authorization code received from Google.');
+          break;
+        case 'token_exchange_failed':
+          toast.error('Failed to exchange authorization code. Please try again.');
+          break;
+        case 'user_info_failed':
+          toast.error('Failed to get user information from Google.');
+          break;
+        case 'backend_auth_failed':
+          toast.error('Backend authentication failed. Please try again.');
+          break;
+        case 'oauth_error':
+          toast.error('OAuth error occurred. Please try again.');
+          break;
+        default:
+          toast.error('An error occurred during Google authentication.');
+      }
+      
+      // Clear the error from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -46,10 +81,18 @@ export default function SignInPage() {
       }
 
       // Store the token and user data in cookies
-      document.cookie = `token=${data.access_token}; path=/; max-age=${7 * 24 * 60 * 60}`;
-      document.cookie = `user=${JSON.stringify(data.user)}; path=/; max-age=${7 * 24 * 60 * 60}`;
+      document.cookie = `token=${data.access_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+      document.cookie = `user=${JSON.stringify(data.user)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
 
-      toast.success('Login successful! Welcome back to TAD.');
+      toast.success('Login successful! Welcome back to TAD.', {
+        duration: 3000, // Show for only 3 seconds
+        dismissible: true, // Allow manual dismissal
+        action: {
+          label: 'Dismiss',
+          onClick: () => toast.dismiss(),
+        },
+        position: 'top-center', // Position in center-top instead of top-right
+      });
 
       // Redirect to homepage after successful login
       router.push('/');
@@ -151,6 +194,19 @@ export default function SignInPage() {
               >
                 {isLoading ? "Signing In..." : "SIGN IN"}
               </Button>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-white/20" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-gradient-to-br from-red-900 via-red-800 to-red-900 px-2 text-white/60">Or continue with</span>
+                </div>
+              </div>
+
+              {/* Google Sign In Button */}
+              <GoogleSignInButton />
 
               {/* Alternative Button */}
               <Link href="/auth/signup">

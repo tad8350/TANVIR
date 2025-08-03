@@ -146,6 +146,45 @@ export class AuthService {
     };
   }
 
+  async googleAuth(email: string, firstName: string, lastName: string, googleId: string, picture?: string) {
+    // Check if user already exists
+    let user = await this.usersService.findByEmail(email);
+    
+    if (!user) {
+      // Create new user with Google data
+      user = await this.usersService.create({
+        email,
+        password: '', // Google users don't need password
+        user_type: 'customer', // Google auth is only for customers
+        firstName,
+        lastName,
+        googleId,
+        picture,
+      });
+    }
+
+    // Update last login
+    await this.usersService.updateLastLogin(user.id);
+
+    // Generate JWT token
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      user_type: user.user_type,
+    };
+
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: {
+        id: user.id,
+        email: user.email,
+        user_type: user.user_type,
+        is_verified: user.is_verified,
+        is_active: user.is_active,
+      },
+    };
+  }
+
   async verifyToken(token: string) {
     try {
       const payload = this.jwtService.verify(token);

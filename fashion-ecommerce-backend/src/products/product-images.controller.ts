@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ProductImagesService } from './product-images.service';
 import { CreateProductImageDto, UpdateProductImageDto, ProductImageResponseDto } from './dto/product-image.dto';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Product Images')
 @Controller('product-images')
@@ -9,6 +10,7 @@ export class ProductImagesController {
   constructor(private readonly productImagesService: ProductImagesService) {}
 
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Get all product images' })
   @ApiQuery({ name: 'product_id', required: false, description: 'Product ID', example: 1 })
   @ApiResponse({ status: 200, description: 'List of product images', type: [ProductImageResponseDto] })
@@ -17,6 +19,7 @@ export class ProductImagesController {
   }
 
   @Get(':id')
+  @Public()
   @ApiOperation({ summary: 'Get product image by ID' })
   @ApiParam({ name: 'id', description: 'Product image ID', example: 1 })
   @ApiResponse({ status: 200, description: 'Product image details', type: ProductImageResponseDto })

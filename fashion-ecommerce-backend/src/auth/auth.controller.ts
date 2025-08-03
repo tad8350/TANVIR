@@ -50,6 +50,32 @@ export class AuthController {
     );
   }
 
+  @Post('google')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Google OAuth authentication' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Google authentication successful', 
+    type: AuthResponseDto 
+  })
+  @ApiResponse({ status: 400, description: 'Invalid Google data' })
+  async googleAuth(@Body() body: { 
+    email: string; 
+    firstName: string; 
+    lastName: string; 
+    googleId: string; 
+    picture?: string; 
+  }): Promise<AuthResponseDto> {
+    return this.authService.googleAuth(
+      body.email,
+      body.firstName,
+      body.lastName,
+      body.googleId,
+      body.picture,
+    );
+  }
+
   @Post('admin/create-admin')
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)

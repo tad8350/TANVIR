@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { ColorsService } from './colors.service';
 import { CreateColorDto, UpdateColorDto, ColorResponseDto } from './dto/color.dto';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Colors')
 @Controller('colors')
@@ -9,6 +10,7 @@ export class ColorsController {
   constructor(private readonly colorsService: ColorsService) {}
 
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Get all colors' })
   @ApiResponse({ status: 200, description: 'List of colors', type: [ColorResponseDto] })
   async findAll() {
@@ -16,6 +18,7 @@ export class ColorsController {
   }
 
   @Get(':id')
+  @Public()
   @ApiOperation({ summary: 'Get color by ID' })
   @ApiParam({ name: 'id', description: 'Color ID', example: 1 })
   @ApiResponse({ status: 200, description: 'Color details', type: ColorResponseDto })

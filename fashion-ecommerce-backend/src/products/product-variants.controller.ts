@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ProductVariantsService } from './product-variants.service';
 import { CreateProductVariantDto, UpdateProductVariantDto, ProductVariantResponseDto } from './dto/product-variant.dto';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Product Variants')
 @Controller('product-variants')
@@ -9,6 +10,7 @@ export class ProductVariantsController {
   constructor(private readonly productVariantsService: ProductVariantsService) {}
 
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Get all product variants' })
   @ApiQuery({ name: 'page', required: false, description: 'Page number', example: 1 })
   @ApiQuery({ name: 'limit', required: false, description: 'Items per page', example: 10 })
@@ -23,6 +25,7 @@ export class ProductVariantsController {
   }
 
   @Get(':id')
+  @Public()
   @ApiOperation({ summary: 'Get product variant by ID' })
   @ApiParam({ name: 'id', description: 'Product variant ID', example: 1 })
   @ApiResponse({ status: 200, description: 'Product variant details', type: ProductVariantResponseDto })

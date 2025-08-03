@@ -48,7 +48,12 @@ export class UsersService {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto & { 
+    firstName?: string; 
+    lastName?: string; 
+    googleId?: string; 
+    picture?: string; 
+  }) {
     const existingUser = await this.userRepository.findOne({
       where: [
         { email: createUserDto.email },
@@ -59,14 +64,24 @@ export class UsersService {
       throw new ConflictException('User with this email already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    // Handle Google users (no password hashing needed)
+    const password = createUserDto.password ? await bcrypt.hash(createUserDto.password, 10) : '';
+    
     const user = this.userRepository.create({
       email: createUserDto.email,
-      password: hashedPassword,
+      password,
       user_type: createUserDto.user_type,
     });
 
-    return this.userRepository.save(user);
+    const savedUser = await this.userRepository.save(user);
+
+    // Create profile based on user type
+    if (savedUser.user_type === 'customer') {
+      // Create customer profile
+      await this.createCustomerProfile(savedUser.id, createUserDto.firstName, createUserDto.lastName, createUserDto.googleId, createUserDto.picture);
+    }
+
+    return savedUser;
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
@@ -98,5 +113,19 @@ export class UsersService {
     const user = await this.findOne(id);
     user.last_login = new Date();
     return this.userRepository.save(user);
+  }
+
+  private async createCustomerProfile(userId: number, firstName?: string, lastName?: string, googleId?: string, picture?: string) {
+    // This would create a customer profile in the customer_profiles table
+    // For now, we'll just log the profile creation
+    console.log(`Creating customer profile for user ${userId}:`, {
+      firstName,
+      lastName,
+      googleId,
+      picture
+    });
+    
+    // TODO: Implement actual customer profile creation
+    // This would involve creating a record in the customer_profiles table
   }
 } 
