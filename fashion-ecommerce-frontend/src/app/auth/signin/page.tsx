@@ -95,7 +95,7 @@ export default function SignInPage() {
       });
 
       // Redirect to homepage after successful login
-      router.push('/');
+      router.push('/dashboard');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
       toast.error(errorMessage);

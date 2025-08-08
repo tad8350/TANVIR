@@ -49,12 +49,11 @@ export class User {
   @OneToMany(() => Notification, notification => notification.user)
   notifications: Notification[];
 
-  @OneToOne(() => AdminProfile, adminProfile => adminProfile.user)
-  adminProfile: AdminProfile;
+  // Admin profiles are handled separately
 
-  @OneToOne(() => BrandProfile, brandProfile => brandProfile.user)
+  @OneToOne(() => BrandProfile)
   brandProfile: BrandProfile;
 
-  @OneToOne(() => CustomerProfile, customerProfile => customerProfile.user)
+  @OneToOne(() => CustomerProfile)
   customerProfile: CustomerProfile;
 }

@@ -6,13 +6,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Lock, Mail } from "lucide-react";
+import { useState } from "react";
+import { apiService, AdminLoginResponse } from "@/lib/api";
 
 export default function AdminSignIn() {
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [formData, setFormData] = useState({
+    email: "",
+    password: ""
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    setError(""); // Clear error when user types
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push("/admin/dashboard");
+    setIsLoading(true);
+    setError("");
+
+    console.log('Attempting admin login with:', formData);
+
+    try {
+      const response: AdminLoginResponse = await apiService.adminLogin(formData.email, formData.password);
+      console.log('Admin login successful:', response);
+      
+      // Check if we have the token
+      if (response.access_token) {
+        console.log('Token received, redirecting to dashboard...');
+        // Add a small delay to ensure token is set
+        setTimeout(() => {
+          router.push("/admin/dashboard");
+        }, 100);
+      } else {
+        console.error('No access token in response:', response);
+        setError('Login successful but no token received');
+      }
+    } catch (error: any) {
+      console.error('Admin login failed:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      setError(error.message || 'Login failed. Please check your credentials.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -34,22 +80,47 @@ export default function AdminSignIn() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
+                  {error}
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input id="email" type="email" placeholder="admin@tad.com" className="pl-10" required />
+                  <Input 
+                    id="email" 
+                    type="email" 
+                    placeholder="superadmin@tad.com" 
+                    className="pl-10" 
+                    required
+                    value={formData.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input id="password" type="password" placeholder="Enter your password" className="pl-10 pr-10" required />
+                  <Input 
+                    id="password" 
+                    type="password" 
+                    placeholder="Enter your password" 
+                    className="pl-10 pr-10" 
+                    required
+                    value={formData.password}
+                    onChange={(e) => handleInputChange('password', e.target.value)}
+                  />
                 </div>
               </div>
-              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                Sign In
+              <Button 
+                type="submit" 
+                className="w-full bg-blue-600 hover:bg-blue-700"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Signing In...' : 'Sign In'}
               </Button>
             </form>
           </CardContent>

@@ -32,10 +32,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         throw new UnauthorizedException('Invalid token payload');
       }
       
+      // Handle both admin and regular user tokens
       const user = {
         id: payload.sub,
         email: payload.email,
-        user_type: payload.user_type,
+        user_type: payload.user_type, // This will be 'role' for admin, 'user_type' for regular users
       };
       
       console.log('JWT Strategy returning user:', user);

@@ -22,6 +22,6 @@ export class Category {
   @OneToMany(() => Category, category => category.parent)
   children: Category[];
 
-  @OneToMany(() => Product, product => product.category)
+  @OneToMany(() => Product, product => product.categoryRelation)
   products: Product[];
 }

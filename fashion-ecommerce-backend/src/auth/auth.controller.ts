@@ -2,6 +2,7 @@ import { Controller, Post, Body, HttpCode, HttpStatus, Get, Req } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto, AuthResponseDto } from './dto/auth.dto';
+
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 
@@ -76,25 +77,35 @@ export class AuthController {
     );
   }
 
-  @Post('admin/create-admin')
+  @Post('admin/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin login' })
+  @ApiResponse({ status: 200, description: 'Login successful' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  async adminLogin(@Body() loginDto: LoginDto) {
+    return this.authService.adminLogin(loginDto.email, loginDto.password);
+  }
+
+  @Post('admin/setup-super-admin')
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Setup super admin (one-time only)' })
+  @ApiResponse({ status: 201, description: 'Super admin created successfully' })
+  @ApiResponse({ status: 409, description: 'Super admin already exists' })
+  async setupSuperAdmin(@Body() registerDto: RegisterDto) {
+    return this.authService.setupSuperAdmin(registerDto);
+  }
+
+  @Post('admin/create')
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create admin user (admin only)' })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Admin user created successfully'
-  })
-  @ApiResponse({ status: 403, description: 'Only admins can create admin users' })
-  @ApiResponse({ status: 409, description: 'User already exists' })
-  async createAdminUser(
-    @Body() body: { email: string; password: string },
-    @CurrentUser() user: any
-  ) {
-    return this.authService.createAdminUser(
-      body.email,
-      body.password,
-      user.id,
-    );
+  @ApiOperation({ summary: 'Create admin user (super admin only)' })
+  @ApiResponse({ status: 201, description: 'Admin created successfully' })
+  @ApiResponse({ status: 403, description: 'Only super admin can create admins' })
+  @ApiResponse({ status: 409, description: 'Email already exists' })
+  async createAdmin(@Body() registerDto: RegisterDto) {
+    return this.authService.createAdmin(registerDto);
   }
 
   @Post('admin/create-brand')

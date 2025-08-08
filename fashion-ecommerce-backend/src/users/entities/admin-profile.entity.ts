@@ -1,28 +1,31 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn } from 'typeorm';
-import { User } from './user.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('admin_profiles')
 export class AdminProfile {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ name: 'user_id', unique: true })
-  user_id: number;
+  @Column({ unique: true })
+  email: string;
 
-  @Column({ name: 'first_name', nullable: true })
-  first_name: string;
+  @Column()
+  password: string;
 
-  @Column({ name: 'last_name', nullable: true })
-  last_name: string;
+  @Column()
+  name: string;
 
-  @Column({ nullable: true })
+  @Column({ default: 'admin' })
   role: string;
 
-  @Column({ type: 'json', nullable: true })
-  permissions: any;
+  @Column({ default: true })
+  is_active: boolean;
 
-  // Relations
-  @OneToOne(() => User, user => user.adminProfile)
-  @JoinColumn({ name: 'user_id' })
-  user: User;
-} 
+  @Column({ nullable: true, type: 'timestamp' })
+  last_login: Date;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
+  created_at: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
+  updated_at: Date;
+}

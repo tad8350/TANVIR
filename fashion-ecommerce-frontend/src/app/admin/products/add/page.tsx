@@ -18,6 +18,8 @@ import {
   Image, Palette, Ruler, Hash, Trash2, Star
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { apiService } from "@/lib/api";
+import { toast } from "sonner";
 
 export default function AddProduct() {
   const router = useRouter();
@@ -25,6 +27,7 @@ export default function AddProduct() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showVariants, setShowVariants] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -42,7 +45,7 @@ export default function AddProduct() {
     categoryLevel3: '', // T-shirts, Polo Shirts, Shirts, etc.
     categoryLevel4: '', // Basic T-shirts, Printed T-shirts, etc.
     brand: '',
-    status: '',
+    status: 'active', // Set default status
     // Inventory fields
     lowStockThreshold: '',
     // Color blocks
@@ -85,7 +88,7 @@ export default function AddProduct() {
     trackInventory: true,
     allowBackorders: false,
     maxOrderQuantity: '',
-    minOrderQuantity: '',
+    minOrderQuantity: '1', // Set default min order quantity
     // Advanced
     isVirtual: false,
     isDownloadable: false,
@@ -121,6 +124,13 @@ export default function AddProduct() {
   }>({
     images: []
   });
+
+  // Add default color block on component mount
+  useEffect(() => {
+    if (formData.colorBlocks.length === 0) {
+      addColorBlock();
+    }
+  }, []); // Empty dependency array means this runs once on mount
 
   const handleFileUpload = (field: string, file: File | null) => {
     if (file) {
@@ -326,11 +336,11 @@ export default function AddProduct() {
 
 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate all required fields
-    const requiredFields = ['name', 'title', 'price', 'brand', 'sku', 'quantity'];
+    // Basic validation - only check essential fields
+    const requiredFields = ['name', 'title', 'price', 'brand'];
     const newErrors: Record<string, string> = {};
     
     requiredFields.forEach(field => {
@@ -340,30 +350,118 @@ export default function AddProduct() {
       }
     });
 
-    // Custom category validation
-    if (!formData.categoryLevel1 || !formData.categoryLevel2 || !formData.categoryLevel3) {
-      newErrors.category = 'Please complete the category selection';
-    } else if (hasFourthLevelCategories() && !formData.categoryLevel4) {
-      newErrors.category = 'Please select a specific item for this category';
-    } else if (!formData.category) {
-      newErrors.category = 'Category selection is incomplete';
-    }
-
+    // Only show errors for essential fields
     if (Object.keys(newErrors).length > 0) {
       setFormData(prev => ({
         ...prev,
         errors: newErrors
       }));
+      toast.error('Please fill in all required fields');
       return;
     }
 
-    // Submit form data
-    console.log('Submitting product:', formData);
-    // Here you would typically send the data to your API
-    router.push('/admin/products');
+    try {
+      setIsSubmitting(true);
+      
+      // Prepare the data for submission
+      const productData = {
+        name: formData.name,
+        title: formData.title,
+        description: formData.description,
+        shortDescription: formData.shortDescription,
+        price: formData.price,
+        salePrice: formData.salePrice || undefined,
+        costPrice: formData.costPrice || undefined,
+        sku: formData.sku,
+        barcode: formData.barcode,
+        brand: formData.brand,
+        status: formData.status,
+        categoryLevel1: formData.categoryLevel1,
+        categoryLevel2: formData.categoryLevel2,
+        categoryLevel3: formData.categoryLevel3,
+        categoryLevel4: formData.categoryLevel4,
+        category: formData.category,
+        lowStockThreshold: formData.lowStockThreshold || undefined,
+        maxOrderQuantity: formData.maxOrderQuantity || undefined,
+        minOrderQuantity: formData.minOrderQuantity || '1',
+        downloadLimit: formData.downloadLimit || undefined,
+        downloadExpiry: formData.downloadExpiry || undefined,
+        taxRate: formData.taxRate || undefined,
+        shippingWeight: formData.shippingWeight || undefined,
+        // Ensure arrays are properly formatted
+        tags: formData.tags || [],
+        images: formData.images || [],
+        variants: formData.variants || [],
+        colorBlocks: formData.colorBlocks.map(block => ({
+          id: block.id,
+          color: block.color,
+          newColor: block.newColor,
+          images: [], // Convert File[] to empty array for now (would need file upload handling)
+          sizes: block.sizes.map(size => ({
+            id: size.id,
+            size: size.size,
+            quantity: size.quantity || '0'
+          }))
+        })),
+        // SEO & Marketing
+        metaTitle: formData.metaTitle,
+        metaDescription: formData.metaDescription,
+        keywords: formData.keywords,
+        // Shipping
+        shippingDimensions: formData.shippingDimensions,
+        freeShipping: formData.freeShipping,
+        shippingClass: formData.shippingClass,
+        // Tax & Legal
+        taxClass: formData.taxClass,
+        // Inventory
+        trackInventory: formData.trackInventory,
+        allowBackorders: formData.allowBackorders,
+        // Advanced
+        isVirtual: formData.isVirtual,
+        isDownloadable: formData.isDownloadable,
+        hasVariants: formData.hasVariants,
+        variantType: formData.variantType
+      };
+
+      // Submit to API
+      console.log('Sending product data to backend:', JSON.stringify(productData, null, 2));
+      const response = await apiService.createProduct(productData);
+      
+      console.log('Product created successfully:', response);
+      
+      // Create detailed success message with actual inputs
+      const successMessage = `Product "${formData.name}" created successfully!
+      
+📋 Product Details:
+• Name: ${formData.name}
+• Title: ${formData.title}
+• Brand: ${formData.brand}
+• Price: $${formData.price}
+• Status: ${formData.status || 'active'}
+• Category: ${formData.categoryLevel1} > ${formData.categoryLevel2} > ${formData.categoryLevel3}
+• SKU: ${formData.sku || 'Auto-generated'}
+• Colors: ${formData.colorBlocks.length} color(s) added
+• Total Sizes: ${formData.colorBlocks.reduce((total, block) => total + block.sizes.length, 0)} size(s)`;
+
+      toast.success(successMessage, {
+        duration: 5000,
+        position: "top-center",
+      });
+      
+      // Redirect to products list after a short delay
+      setTimeout(() => {
+      router.push('/admin/products');
+      }, 2000);
+    } catch (error) {
+      console.error('Error creating product:', error);
+      toast.error('Error creating product. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleLogout = () => {
+    apiService.logout();
     router.push('/admin/signin');
   };
 
@@ -1611,6 +1709,7 @@ export default function AddProduct() {
                 type="button"
                 variant="outline"
                 onClick={() => router.push('/admin/products')}
+                className="px-6"
               >
                 Cancel
               </Button>
@@ -1621,18 +1720,20 @@ export default function AddProduct() {
                   variant="outline"
                   onClick={() => {
                     // Save as draft
-                    console.log('Saving as draft...');
+                    toast.info('Draft saving feature coming soon!');
                   }}
+                  className="px-6"
                 >
                   Save as Draft
                 </Button>
                 
                 <Button
                   type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                  disabled={isSubmitting}
                 >
-                  <Save className="h-4 w-4 mr-2" />
-                  Create Product
+                  <Save className="h-5 w-5 mr-2" />
+                  {isSubmitting ? 'Creating Product...' : 'Create Product'}
                 </Button>
               </div>
             </div>

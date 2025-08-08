@@ -1,308 +1,393 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export interface Product {
-  id: number;
-  name: string;
-  description: string;
-  brand_id: number;
-  category_id: number;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  brand: {
-    id: number;
-    brand_name: string;
-    logo_url?: string;
-  };
-  category: {
-    id: number;
-    name: string;
-  };
-  variants: ProductVariant[];
-  images: ProductImage[];
-  reviews?: Review[];
-}
-
-export interface ProductVariant {
-  id: number;
-  product_id: number;
-  color_id?: number;
-  size_id?: number;
-  stock: number;
-  price: string; // Note: price is returned as string from database
-  discount_price?: string | null; // Note: discount_price is returned as string from database
-  sku: string;
-  is_active: boolean;
-  color?: {
-    id: number;
-    name: string;
-    hex_code: string;
-  };
-  size?: {
-    id: number;
-    name: string;
-  };
-}
-
-export interface ProductImage {
-  id: number;
-  product_id: number;
-  url: string; // Note: field is 'url' not 'image_url'
-  is_primary?: boolean;
-  created_at?: string;
-}
-
-export interface Color {
-  id: number;
-  name: string;
-  hex_code: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Size {
-  id: number;
-  name: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Review {
-  id: number;
-  rating: number;
-  comment?: string;
-  created_at: string;
-  user: {
-    id: number;
-    name: string;
-  };
-}
-
-export interface Category {
-  id: number;
-  name: string;
-  description?: string;
-  parent_id?: number;
-  created_at: string;
-  updated_at: string;
-  children?: Category[];
-}
-
-export interface Brand {
-  id: number;
-  brand_name: string; // Note: field is 'brand_name' not 'name'
-  description?: string;
-  logo_url?: string;
-  website?: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface ApiResponse<T> {
-  data: T[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
+  data: T;
+  message?: string;
+  error?: string;
+}
+
+export interface AdminLoginResponse {
+  access_token: string;
+  admin: {
+    id: number;
+    email: string;
+    name: string;
+    role: string;
   };
 }
 
-// Fetch products with optional filters
-export async function fetchProducts(params: {
-  page?: number;
-  limit?: number;
-  search?: string;
-  category_id?: number;
-  brand_id?: number;
-  status?: string;
-} = {}): Promise<ApiResponse<Product>> {
-  const searchParams = new URLSearchParams();
-  
-  if (params.page) searchParams.append('page', params.page.toString());
-  if (params.limit) searchParams.append('limit', params.limit.toString());
-  if (params.search) searchParams.append('search', params.search);
-  if (params.category_id) searchParams.append('category_id', params.category_id.toString());
-  if (params.brand_id) searchParams.append('brand_id', params.brand_id.toString());
-  if (params.status) searchParams.append('status', params.status);
-
-  const response = await fetch(`${API_BASE_URL}/products?${searchParams.toString()}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch products: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch product variants
-export async function fetchProductVariants(params: {
-  page?: number;
-  limit?: number;
-  product_id?: number;
-} = {}): Promise<ApiResponse<ProductVariant>> {
-  const searchParams = new URLSearchParams();
-  
-  if (params.page) searchParams.append('page', params.page.toString());
-  if (params.limit) searchParams.append('limit', params.limit.toString());
-  if (params.product_id) searchParams.append('product_id', params.product_id.toString());
-
-  const response = await fetch(`${API_BASE_URL}/product-variants?${searchParams.toString()}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch product variants: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch product images
-export async function fetchProductImages(productId?: number): Promise<ProductImage[]> {
-  const searchParams = new URLSearchParams();
-  if (productId) searchParams.append('product_id', productId.toString());
-
-  const response = await fetch(`${API_BASE_URL}/product-images?${searchParams.toString()}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch product images: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch colors
-export async function fetchColors(): Promise<Color[]> {
-  const response = await fetch(`${API_BASE_URL}/colors`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch colors: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch sizes
-export async function fetchSizes(): Promise<Size[]> {
-  const response = await fetch(`${API_BASE_URL}/sizes`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch sizes: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch featured products (active products with images)
-export async function fetchFeaturedProducts(limit: number = 10): Promise<Product[]> {
-  const response = await fetchProducts({
-    limit,
-    status: 'active'
-  });
-  
-  // Filter products that have images and variants
-  return response.data.filter(product => 
-    product.images && product.images.length > 0 && 
-    product.variants && product.variants.length > 0
-  );
-}
-
-// Fetch categories
-export async function fetchCategories(parentId?: number): Promise<Category[]> {
-  const searchParams = new URLSearchParams();
-  if (parentId) searchParams.append('parent_id', parentId.toString());
-
-  const response = await fetch(`${API_BASE_URL}/categories?${searchParams.toString()}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch categories: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Fetch brands
-export async function fetchBrands(params: {
-  page?: number;
-  limit?: number;
-  search?: string;
-} = {}): Promise<ApiResponse<Brand>> {
-  const searchParams = new URLSearchParams();
-  
-  if (params.page) searchParams.append('page', params.page.toString());
-  if (params.limit) searchParams.append('limit', params.limit.toString());
-  if (params.search) searchParams.append('search', params.search);
-
-  const response = await fetch(`${API_BASE_URL}/brands?${searchParams.toString()}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch brands: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-// Get product with lowest price variant
-export function getProductPrice(product: Product): { price: number; discountPrice?: number } {
-  if (!product.variants || product.variants.length === 0) {
-    return { price: 0 };
-  }
-  
-  const activeVariants = product.variants.filter(v => v.is_active);
-  if (activeVariants.length === 0) {
-    return { price: 0 };
-  }
-  
-  const lowestPriceVariant = activeVariants.reduce((lowest, current) => {
-    const currentPrice = current.discount_price ? parseFloat(current.discount_price) : parseFloat(current.price);
-    const lowestPrice = lowest.discount_price ? parseFloat(lowest.discount_price) : parseFloat(lowest.price);
-    return currentPrice < lowestPrice ? current : lowest;
-  });
-  
-  return {
-    price: parseFloat(lowestPriceVariant.price) || 0,
-    discountPrice: lowestPriceVariant.discount_price ? parseFloat(lowestPriceVariant.discount_price) : undefined
+export interface ProductFormData {
+  name: string;
+  title: string;
+  description?: string;
+  shortDescription?: string;
+  price: string;
+  salePrice?: string;
+  costPrice?: string;
+  sku: string;
+  barcode?: string;
+  brand: string;
+  status: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
+  categoryLevel3: string;
+  categoryLevel4?: string;
+  category: string;
+  lowStockThreshold?: string;
+  colorBlocks: Array<{
+    id: string;
+    color: string;
+    newColor: string;
+    images: File[];
+    sizes: Array<{
+      id: string;
+      size: string;
+      quantity: string;
+    }>;
+  }>;
+  images: string[];
+  mainImage?: string;
+  hasVariants: boolean;
+  variantType?: string;
+  variants: any[];
+  metaTitle?: string;
+  metaDescription?: string;
+  keywords?: string;
+  tags: string[];
+  shippingWeight?: string;
+  shippingDimensions?: {
+    length: string;
+    width: string;
+    height: string;
   };
+  freeShipping: boolean;
+  shippingClass?: string;
+  taxClass?: string;
+  taxRate?: string;
+  trackInventory: boolean;
+  allowBackorders: boolean;
+  maxOrderQuantity?: string;
+  minOrderQuantity?: string;
+  isVirtual: boolean;
+  isDownloadable: boolean;
+  downloadLimit?: string;
+  downloadExpiry?: string;
 }
 
-// Get product average rating
-export function getProductRating(product: Product): { rating: number; reviewCount: number } {
-  if (!product.reviews || product.reviews.length === 0) {
-    return { rating: 0, reviewCount: 0 };
-  }
-  
-  const totalRating = product.reviews.reduce((sum, review) => sum + review.rating, 0);
-  const averageRating = totalRating / product.reviews.length;
-  
-  return {
-    rating: Math.round(averageRating * 10) / 10, // Round to 1 decimal place
-    reviewCount: product.reviews.length
-  };
+// Helper function to get token from cookies
+function getToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const cookies = document.cookie.split(';');
+  const tokenCookie = cookies.find(cookie => cookie.trim().startsWith('admin_token='));
+  return tokenCookie ? tokenCookie.split('=')[1] : null;
 }
 
-// Get primary product image
-export function getProductImage(product: Product): string | null {
-  if (!product.images || product.images.length === 0) {
-    return null;
-  }
-  
-  const primaryImage = product.images.find(img => img.is_primary);
-  return primaryImage ? primaryImage.url : product.images[0].url;
+// Helper function to set token in cookies
+function setToken(token: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `admin_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
 }
 
-// Get product variants with color and size information
-export async function getProductVariantsWithDetails(productId: number): Promise<ProductVariant[]> {
-  try {
-    const variantsResponse = await fetchProductVariants({ product_id: productId });
-    const colors = await fetchColors();
-    const sizes = await fetchSizes();
+// Helper function to remove token from cookies
+function removeToken(): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = 'admin_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
+}
+
+class ApiService {
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<ApiResponse<T>> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    const token = getToken();
     
-    return variantsResponse.data.map(variant => ({
-      ...variant,
-      color: colors.find(c => c.id === variant.color_id),
-      size: sizes.find(s => s.id === variant.size_id)
-    }));
-  } catch (error) {
-    console.error('Error fetching product variants with details:', error);
-    return [];
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...options.headers as Record<string, string>,
+    };
+
+    // Add authorization header if token exists
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const config: RequestInit = {
+      headers,
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'API request failed');
+      }
+
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
   }
-} 
+
+  // Auth endpoints
+  async adminLogin(email: string, password: string): Promise<AdminLoginResponse> {
+    const url = `${API_BASE_URL}/auth/admin/login`;
+    const token = getToken();
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    const config: RequestInit = {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email, password }),
+    };
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'API request failed');
+      }
+
+      // Store the token if login is successful
+      if (data.access_token) {
+        setToken(data.access_token);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
+  }
+
+  async login(email: string, password: string) {
+    return this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  async register(userData: any) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  // Logout function
+  logout(): void {
+    removeToken();
+  }
+
+  // Check if user is authenticated
+  isAuthenticated(): boolean {
+    return getToken() !== null;
+  }
+
+  // Product endpoints
+  async createProduct(productData: ProductFormData) {
+    return this.request('/products', {
+      method: 'POST',
+      body: JSON.stringify(productData),
+    });
+  }
+
+  async getProducts(page: number = 1, limit: number = 10, filters: any = {}) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+      ...filters,
+    });
+    return this.request(`/products?${params}`);
+  }
+
+  async getProduct(id: number) {
+    return this.request(`/products/${id}`);
+  }
+
+  async updateProduct(id: number, productData: Partial<ProductFormData>) {
+    return this.request(`/products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(productData),
+    });
+  }
+
+  async deleteProduct(id: number) {
+    return this.request(`/products/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Dropdown data endpoints
+  async getBrands() {
+    return this.request<string[]>('/products/brands/list');
+  }
+
+  async getColors() {
+    return this.request<string[]>('/products/colors/list');
+  }
+
+  async getSizes() {
+    return this.request<string[]>('/products/sizes/list');
+  }
+
+  // Categories endpoints
+  async getCategories(parentId?: number) {
+    const params = parentId ? `?parent_id=${parentId}` : '';
+    return this.request(`/products/categories${params}`);
+  }
+
+  async getCategoryTree() {
+    return this.request('/products/categories/tree');
+  }
+
+  // Brand endpoints
+  async getBrandsList(page: number = 1, limit: number = 10, search?: string) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+      ...(search && { search }),
+    });
+    return this.request(`/products/brands?${params}`);
+  }
+
+  async getBrand(id: number) {
+    return this.request(`/products/brands/${id}`);
+  }
+
+  async createBrand(brandData: any) {
+    return this.request('/products/brands', {
+      method: 'POST',
+      body: JSON.stringify(brandData),
+    });
+  }
+
+  async updateBrand(id: number, brandData: any) {
+    return this.request(`/products/brands/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(brandData),
+    });
+  }
+
+  async deleteBrand(id: number) {
+    return this.request(`/products/brands/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Color endpoints
+  async getColorsList() {
+    return this.request('/products/colors');
+  }
+
+  async createColor(colorData: any) {
+    return this.request('/products/colors', {
+      method: 'POST',
+      body: JSON.stringify(colorData),
+    });
+  }
+
+  async updateColor(id: number, colorData: any) {
+    return this.request(`/products/colors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(colorData),
+    });
+  }
+
+  async deleteColor(id: number) {
+    return this.request(`/products/colors/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Size endpoints
+  async getSizesList() {
+    return this.request('/products/sizes');
+  }
+
+  async createSize(sizeData: any) {
+    return this.request('/products/sizes', {
+      method: 'POST',
+      body: JSON.stringify(sizeData),
+    });
+  }
+
+  async updateSize(id: number, sizeData: any) {
+    return this.request(`/products/sizes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(sizeData),
+    });
+  }
+
+  async deleteSize(id: number) {
+    return this.request(`/products/sizes/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Dashboard specific methods
+  async fetchFeaturedProducts(limit: number = 20) {
+    return this.request(`/products?limit=${limit}&featured=true`);
+  }
+
+  async fetchCategories() {
+    return this.request('/products/categories');
+  }
+
+  async fetchBrands(options: { limit?: number } = {}) {
+    const params = new URLSearchParams({
+      limit: (options.limit || 10).toString(),
+    });
+    return this.request(`/products/brands?${params}`);
+  }
+
+  async fetchColors() {
+    return this.request('/products/colors');
+  }
+
+  async fetchSizes() {
+    return this.request('/products/sizes');
+  }
+
+  // Product utility methods
+  getProductPrice(product: any) {
+    const price = parseFloat(product.price) || 0;
+    const salePrice = product.salePrice ? parseFloat(product.salePrice) : null;
+    
+    return {
+      price,
+      discountPrice: salePrice,
+      hasDiscount: salePrice !== null && salePrice < price,
+      discountPercentage: salePrice ? Math.round(((price - salePrice) / price) * 100) : 0
+    };
+  }
+
+  getProductRating(product: any) {
+    // Mock rating for now - you can implement real rating logic
+    return {
+      rating: 4.5,
+      reviewCount: Math.floor(Math.random() * 100) + 10
+    };
+  }
+
+  getProductImage(product: any) {
+    if (product.images && product.images.length > 0) {
+      return product.images[0];
+    }
+    return '/images/placeholder-product.jpg';
+  }
+
+  getProductVariantsWithDetails(product: any) {
+    // Mock variants for now
+    return product.variants || [];
+  }
+}
+
+export const apiService = new ApiService(); 
