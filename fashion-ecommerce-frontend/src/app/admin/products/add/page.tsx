@@ -450,7 +450,7 @@ export default function AddProduct() {
       
       // Redirect to products list after a short delay
       setTimeout(() => {
-      router.push('/admin/products');
+        router.push('/admin/products');
       }, 2000);
     } catch (error) {
       console.error('Error creating product:', error);

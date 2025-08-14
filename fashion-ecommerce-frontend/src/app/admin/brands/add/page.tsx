@@ -17,6 +17,7 @@ import {
   ArrowLeft, Upload, Globe, Phone, Building, FileText, Eye, EyeOff, Save
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { apiService } from "@/lib/api";
 
 export default function AddBrand() {
   const router = useRouter();
@@ -94,10 +95,23 @@ export default function AddBrand() {
     logo: null
   });
 
+  const [debugMode, setDebugMode] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
 
   const handleFileUpload = (field: string, file: File | null) => {
     if (file) {
+      // For now, we'll create a local file path
+      // In production, you'd upload to a cloud service and get a URL
+      const fileName = `${field}_${Date.now()}_${file.name}`;
+      const filePath = `/uploads/brands/${fileName}`;
+      
+      setFormData(prev => ({
+        ...prev,
+        [field]: filePath
+      }));
+
+      // Create preview
       const reader = new FileReader();
       reader.onload = (e) => {
         setPreviews(prev => ({
@@ -106,7 +120,26 @@ export default function AddBrand() {
         }));
       };
       reader.readAsDataURL(file);
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+      setPreviews(prev => ({
+        ...prev,
+        [field]: null
+      }));
     }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    handleFileUpload('brandLogo', file);
+  };
+
+  const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    handleFileUpload('brandBanner', file);
   };
 
   const handleBannerUrlChange = (url: string) => {
@@ -186,8 +219,10 @@ export default function AddBrand() {
     }
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSubmitting) return; // Prevent multiple submissions
     
     // Validate all required fields
     const requiredFields = ['brandName', 'contactEmail', 'ownerFullName', 'ownerEmail', 'ownerPassword'];
@@ -211,9 +246,138 @@ export default function AddBrand() {
     // Clear draft from localStorage
     localStorage.removeItem('brandFormDraft');
     
-    // Handle form submission
-    console.log('Form submitted:', formData);
-    router.push('/admin/brands');
+    try {
+      setIsSubmitting(true);
+      
+      // Create the brand directly (backend will handle defaults)
+      const brandData: any = {
+        // Basic Information
+        brand_name: formData.brandName,
+        business_name: formData.brandName, // Use brand name as business name if not specified
+        description: formData.description || '',
+        contact_email: formData.contactEmail,
+        phone_number: formData.phoneNumber || undefined,
+        logo_url: formData.brandLogo || undefined,
+        banner_url: formData.brandBanner || undefined,
+        website_url: formData.websiteUrl || undefined,
+        website: formData.websiteUrl || undefined,
+        category: formData.category || undefined,
+
+        // Social Media Links
+        facebook_url: formData.facebookUrl || undefined,
+        instagram_url: formData.instagramUrl || undefined,
+        twitter_url: formData.twitterUrl || undefined,
+        linkedin_url: formData.linkedinUrl || undefined,
+
+        // Contact Information
+        contact_person: formData.ownerFullName || undefined, // Use owner name as contact person
+        phone: formData.phoneNumber || undefined, // Alternative phone field
+        address: formData.address || undefined,
+        region: formData.region || undefined,
+        district: formData.district || undefined,
+
+        // Business Details
+        registration_number: formData.registrationNumber || undefined,
+        business_license: formData.businessLicenseNumber || undefined,
+        tax_id: formData.taxId || undefined,
+        tin_number: formData.tinNumber || undefined,
+        trade_license: formData.tradeLicense || undefined,
+        vat_registration: formData.vatRegistration || undefined,
+        import_export_license: formData.importExportLicense || undefined,
+
+        // Payment Info
+        payment_method: formData.paymentMethod || undefined,
+        payment_phone: formData.mobileBankingPhone || undefined,
+        account_holder_name: formData.mobileBankingName || undefined,
+        payment_email: formData.paymentEmail || undefined,
+
+        // Operational Details
+        warehouse_location: formData.warehouseLocation || undefined,
+        physical_shops: formData.physicalShops || undefined,
+        return_policy: formData.returnPolicy || undefined,
+        warranty_policy: formData.warrantyPolicy || undefined,
+        minimum_order_quantity: formData.minimumOrderQuantity || undefined,
+        shipping_zones: formData.shippingZones || undefined,
+
+        // Partnership Settings
+        commission_rate: formData.commissionRate ? parseInt(formData.commissionRate) : undefined,
+        payment_terms: formData.paymentTerms || undefined,
+        commission_structure: formData.commissionStructure || undefined,
+        payment_schedule: formData.paymentSchedule || undefined,
+        minimum_payout_amount: formData.minimumPayoutAmount || undefined,
+        tax_deduction_details: formData.taxDeductionDetails || undefined,
+
+        // Brand Owner Account
+        owner_full_name: formData.ownerFullName || undefined,
+        owner_email: formData.ownerEmail || undefined,
+        owner_password: formData.ownerPassword || undefined,
+
+        // Technical & Integration
+        api_keys: formData.apiKeys || undefined,
+        webhook_urls: formData.webhookUrls || undefined,
+        integration_settings: formData.integrationSettings || undefined
+      };
+
+      console.log('Creating brand:', brandData);
+      const brandResponse = await apiService.createBrand(brandData);
+      
+      console.log('Brand created successfully:', brandResponse);
+      
+      // Show success message with login credentials
+      if (brandResponse && brandResponse.data) {
+        const responseData = brandResponse.data as any;
+        console.log('=== BRAND CREATION DEBUG ===');
+        console.log('Full response:', brandResponse);
+        console.log('Response data:', responseData);
+        console.log('Login credentials:', responseData.loginCredentials);
+        console.log('Brand data:', responseData.brand);
+        
+        if (responseData.loginCredentials) {
+          const credentials = responseData.loginCredentials;
+          
+          const message = `
+Brand created successfully!
+
+📧 Brand Login Credentials:
+Email: ${credentials.email}
+Password: ${credentials.password}
+
+⚠️ IMPORTANT: Send these credentials to the brand for portal access.
+          `;
+          alert(message);
+        } else {
+          console.log('No login credentials found in response');
+          alert('Brand created successfully!');
+        }
+      } else {
+        alert('Brand created successfully!');
+      }
+      
+      // Redirect to brands list
+      router.push('/admin/brands');
+      
+    } catch (error) {
+      console.error('Error creating brand:', error);
+      
+      let errorMessage = 'Failed to create brand. Please try again.';
+      if (error instanceof Error) {
+        if (error.message.includes('fetch')) {
+          errorMessage = 'Unable to connect to server. Please check your connection.';
+        } else if (error.message.includes('401')) {
+          errorMessage = 'Authentication required. Please login again.';
+        } else if (error.message.includes('403')) {
+          errorMessage = 'Access denied. Insufficient permissions.';
+        } else if (error.message.includes('500')) {
+          errorMessage = 'Server error. Please try again later.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleLogout = () => {
@@ -1345,7 +1509,7 @@ export default function AddBrand() {
                             type="file"
                             ref={bannerFileInputRef}
                             accept="image/*"
-                            onChange={(e) => handleFileUpload('banner', e.target.files?.[0] || null)}
+                            onChange={(e) => handleBannerUpload(e)}
                             className="hidden"
                           />
                           <Button 
@@ -1374,7 +1538,7 @@ export default function AddBrand() {
                             type="file"
                             ref={logoFileInputRef}
                             accept="image/*"
-                            onChange={(e) => handleFileUpload('logo', e.target.files?.[0] || null)}
+                            onChange={(e) => handleLogoUpload(e)}
                             className="hidden"
                           />
                           <Button 
@@ -1494,10 +1658,20 @@ export default function AddBrand() {
               </Button>
               <Button 
                 type="submit" 
-                className="bg-blue-600 hover:bg-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg text-sm"
+                disabled={isSubmitting}
+                className="bg-blue-600 hover:bg-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Plus className="h-3 w-3 mr-1" />
-                Create Brand
+                {isSubmitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Creating Brand...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-3 w-3 mr-1" />
+                    Create Brand
+                  </>
+                )}
               </Button>
               </div>
             </div>

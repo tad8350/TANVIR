@@ -4,6 +4,7 @@ import { Product } from './entities/product.entity';
 import { ProductVariant } from './entities/product-variant.entity';
 import { ProductImage } from './entities/product-image.entity';
 import { BrandProfile } from '../users/entities/brand-profile.entity';
+import { User } from '../users/entities/user.entity';
 import { Category } from './entities/category.entity';
 import { Color } from './entities/color.entity';
 import { Size } from './entities/size.entity';
@@ -29,6 +30,7 @@ import { SizesService } from './sizes.service';
       ProductVariant,
       ProductImage,
       BrandProfile,
+      User,
       Category,
       Color,
       Size,

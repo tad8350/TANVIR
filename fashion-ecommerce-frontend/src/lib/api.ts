@@ -226,7 +226,7 @@ class ApiService {
   }
 
   // Dropdown data endpoints
-  async getBrands() {
+  async getBrandsList() {
     return this.request<string[]>('/products/brands/list');
   }
 
@@ -249,37 +249,51 @@ class ApiService {
   }
 
   // Brand endpoints
-  async getBrandsList(page: number = 1, limit: number = 10, search?: string) {
+  async getBrands(page: number = 1, limit: number = 10, search?: string, filters?: any) {
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
       ...(search && { search }),
+      ...(filters?.status && filters.status !== 'all' && { status: filters.status }),
+      ...(filters?.category && filters.category !== 'all' && { category: filters.category }),
+      ...(filters?.dateRange && filters.dateRange !== 'all' && { dateRange: filters.dateRange }),
     });
-    return this.request(`/products/brands?${params}`);
+    return this.request(`/brands?${params}`);
   }
 
   async getBrand(id: number) {
-    return this.request(`/products/brands/${id}`);
+    return this.request(`/brands/${id}`);
   }
 
   async createBrand(brandData: any) {
-    return this.request('/products/brands', {
+    return this.request('/brands', {
       method: 'POST',
       body: JSON.stringify(brandData),
     });
   }
 
+  async createUser(userData: any) {
+    return this.request('/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
   async updateBrand(id: number, brandData: any) {
-    return this.request(`/products/brands/${id}`, {
+    return this.request(`/brands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(brandData),
     });
   }
 
   async deleteBrand(id: number) {
-    return this.request(`/products/brands/${id}`, {
+    return this.request(`/brands/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  async getBrandCredentials(id: number) {
+    return this.request(`/brands/${id}/credentials`);
   }
 
   // Color endpoints

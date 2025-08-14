@@ -21,7 +21,11 @@ export class BrandsController {
     @Query('limit') limit: number = 10,
     @Query('search') search?: string,
   ) {
-    return this.brandsService.findAll(page, limit, search);
+    const result = await this.brandsService.findAll(page, limit, search);
+    return {
+      data: result.data,
+      meta: result.meta
+    };
   }
 
   @Get(':id')
@@ -54,12 +58,19 @@ export class BrandsController {
   }
 
   @Delete(':id')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Delete brand' })
+  @ApiOperation({ summary: 'Delete a brand' })
   @ApiParam({ name: 'id', description: 'Brand ID', example: 1 })
   @ApiResponse({ status: 200, description: 'Brand deleted successfully' })
-  @ApiResponse({ status: 404, description: 'Brand not found' })
   async remove(@Param('id') id: number) {
     return this.brandsService.remove(id);
+  }
+
+  @Get(':id/credentials')
+  @Public()
+  @ApiOperation({ summary: 'Get brand login credentials' })
+  @ApiParam({ name: 'id', description: 'Brand ID', example: 1 })
+  @ApiResponse({ status: 200, description: 'Brand credentials retrieved successfully' })
+  async getCredentials(@Param('id') id: number) {
+    return this.brandsService.getCredentials(id);
   }
 } 
