@@ -53,6 +53,7 @@ import { UserActivityLog } from './analytics/entities/user-activity-log.entity';
 import { SupportTicket } from './support/entities/support-ticket.entity';
 import { Referral } from './referrals/entities/referral.entity';
 import { getDatabaseConfig } from './config/database.config';
+import { CloudinaryService } from './common/services/cloudinary.service';
 
 @Module({
   imports: [
@@ -115,6 +116,6 @@ import { getDatabaseConfig } from './config/database.config';
     PromotionsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, CloudinaryService],
 })
 export class AppModule {}

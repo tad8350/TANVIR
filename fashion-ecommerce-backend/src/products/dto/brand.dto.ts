@@ -22,10 +22,20 @@ export class CreateBrandDto {
   @IsString()
   logo_url?: string;
 
+  @ApiProperty({ description: 'Brand logo Cloudinary ID', example: 'fashion-ecommerce/brands/logos/logo123', required: false })
+  @IsOptional()
+  @IsString()
+  logo_cloudinary_id?: string;
+
   @ApiProperty({ description: 'Brand banner URL or file path', example: 'https://example.com/banner.png', required: false })
   @IsOptional()
   @IsString()
   banner_url?: string;
+
+  @ApiProperty({ description: 'Brand banner Cloudinary ID', example: 'fashion-ecommerce/brands/banners/banner123', required: false })
+  @IsOptional()
+  @IsString()
+  banner_cloudinary_id?: string;
 
   @ApiProperty({ description: 'Website URL', example: 'https://example.com', required: false })
   @IsOptional()
@@ -272,10 +282,20 @@ export class UpdateBrandDto {
   @IsString()
   logo_url?: string;
 
+  @ApiProperty({ description: 'Brand logo Cloudinary ID', example: 'fashion-ecommerce/brands/logos/logo123', required: false })
+  @IsOptional()
+  @IsString()
+  logo_cloudinary_id?: string;
+
   @ApiProperty({ description: 'Brand banner URL or file path', example: 'https://example.com/banner.png', required: false })
   @IsOptional()
   @IsString()
   banner_url?: string;
+
+  @ApiProperty({ description: 'Brand banner Cloudinary ID', example: 'fashion-ecommerce/brands/banners/banner123', required: false })
+  @IsOptional()
+  @IsString()
+  banner_cloudinary_id?: string;
 
   @ApiProperty({ description: 'Website URL', example: 'https://example.com', required: false })
   @IsOptional()
@@ -521,8 +541,14 @@ export class BrandResponseDto {
   @ApiProperty({ description: 'Brand logo URL or file path', example: 'https://example.com/logo.png' })
   logo_url: string;
 
+  @ApiProperty({ description: 'Brand logo Cloudinary ID', example: 'fashion-ecommerce/brands/logos/logo123' })
+  logo_cloudinary_id: string;
+
   @ApiProperty({ description: 'Brand banner URL or file path', example: 'https://example.com/banner.png' })
   banner_url: string;
+
+  @ApiProperty({ description: 'Brand banner Cloudinary ID', example: 'fashion-ecommerce/brands/banners/banner123' })
+  banner_cloudinary_id: string;
 
   @ApiProperty({ description: 'Website URL', example: 'https://example.com' })
   website_url: string;

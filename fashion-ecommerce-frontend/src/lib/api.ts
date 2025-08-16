@@ -38,7 +38,7 @@ export interface ProductFormData {
     id: string;
     color: string;
     newColor: string;
-    images: File[];
+    images: (File | string)[];
     // Pricing moved to size level - no more color-level pricing
     sizes: Array<{
       id: string;

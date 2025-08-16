@@ -55,10 +55,11 @@ export class ColorBlockDto {
   @IsString()
   newColor?: string;
 
-  @ApiProperty({ description: 'Images for this color', type: [File], required: false })
+  @ApiProperty({ description: 'Images for this color (can be File objects or URLs)', type: [String], required: false })
   @IsOptional()
   @IsArray()
-  images?: File[];
+  @IsString({ each: true })
+  images?: string[];
 
   @ApiProperty({ description: 'Sizes and quantities', type: [ColorBlockSizeDto], required: false })
   @IsOptional()

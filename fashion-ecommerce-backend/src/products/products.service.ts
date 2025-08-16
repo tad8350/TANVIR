@@ -155,12 +155,29 @@ export class ProductsService {
 
     // Handle color blocks and create variants
     if (colorBlocks && colorBlocks.length > 0) {
+      console.log(`Creating product with ${colorBlocks.length} color blocks`);
+      console.log('Color blocks data:', JSON.stringify(colorBlocks, null, 2));
       await this.handleColorBlocks(savedProduct, colorBlocks);
     }
 
-    // Handle product images
+    // Handle product images (only if no color blocks or if images are different from color block images)
     if (images && images.length > 0) {
-      await this.handleProductImages(savedProduct, images);
+      // Check if these images are already processed by color blocks
+      const colorBlockImages = colorBlocks?.flatMap(block => block.images || []) || [];
+      const uniqueImages = images.filter(img => !colorBlockImages.includes(img));
+      
+      console.log('Image deduplication check:');
+      console.log('- Main images array:', images);
+      console.log('- Color block images:', colorBlockImages);
+      console.log('- Unique images (not in color blocks):', uniqueImages);
+      
+      if (uniqueImages.length > 0) {
+        console.log(`Creating product with ${uniqueImages.length} additional main images`);
+        console.log('Additional main images:', uniqueImages);
+        await this.handleProductImages(savedProduct, uniqueImages);
+      } else {
+        console.log('All images already processed by color blocks, skipping main images');
+      }
     }
 
     // Return the complete product with relations
@@ -168,9 +185,13 @@ export class ProductsService {
   }
 
   private async handleColorBlocks(product: Product, colorBlocks: ColorBlockDto[]) {
+    console.log(`Processing ${colorBlocks.length} color blocks for product ${product.id}`);
+    
     for (const colorBlock of colorBlocks) {
       // Skip if color is not provided
       if (!colorBlock.color) continue;
+
+      console.log(`Processing color block: ${colorBlock.color} with ${colorBlock.images?.length || 0} images`);
 
       // Find or create color
       let color = await this.colorRepository.findOne({
@@ -181,6 +202,26 @@ export class ProductsService {
         color = await this.colorRepository.save({
           name: colorBlock.color
         });
+      }
+
+      // Handle images for this color block
+      if (colorBlock.images && colorBlock.images.length > 0) {
+        console.log(`Saving ${colorBlock.images.length} images for color ${colorBlock.color}`);
+        console.log(`Image URLs for ${colorBlock.color}:`, colorBlock.images);
+        
+        for (const imageUrl of colorBlock.images) {
+          if (typeof imageUrl === 'string' && imageUrl.trim()) {
+            console.log(`Saving image URL: ${imageUrl}`);
+            const productImage = this.productImageRepository.create({
+              product_id: product.id,
+              url: imageUrl
+            });
+            await this.productImageRepository.save(productImage);
+            console.log(`Image saved with ID: ${productImage.id}`);
+          }
+        }
+      } else {
+        console.log(`No images found for color block ${colorBlock.color}`);
       }
 
       // Handle sizes and create variants
@@ -216,16 +257,25 @@ export class ProductsService {
         }
       }
     }
+    
+    // Log total images saved for this product
+    const totalImages = await this.productImageRepository.count({ 
+      where: { product_id: product.id } 
+    });
+    console.log(`Total images saved for product ${product.id}: ${totalImages}`);
   }
 
   private async handleProductImages(product: Product, images: string[]) {
+    console.log(`Saving ${images.length} main product images for product ${product.id}`);
     for (const imageUrl of images) {
+      console.log(`Saving main image URL: ${imageUrl}`);
       const productImage = this.productImageRepository.create({
         product_id: product.id,
         url: imageUrl
       });
 
       await this.productImageRepository.save(productImage);
+      console.log(`Main image saved with ID: ${productImage.id}`);
     }
   }
 
@@ -276,19 +326,66 @@ export class ProductsService {
 
     // Handle color blocks update if provided
     if (colorBlocks && colorBlocks.length > 0) {
-      // Remove existing variants for this product
+      // Remove existing variants for this product (but preserve images)
       await this.productVariantRepository.delete({ product_id: product.id });
-      // Create new variants
+      
+      // Get existing images before deleting them
+      const existingImages = await this.productImageRepository.find({ 
+        where: { product_id: product.id } 
+      });
+      const existingImageUrls = existingImages.map(img => img.url);
+      
+      console.log('Preserving existing images:', existingImageUrls);
+      
+      // Remove existing images
+      await this.productImageRepository.delete({ product_id: product.id });
+      
+      // Create new variants and images
       await this.handleColorBlocks(savedProduct, colorBlocks);
+      
+      // Now add back the existing images that weren't replaced
+      // This ensures we keep images from variants that weren't modified
+      const newColorBlockImages = colorBlocks.flatMap(block => block.images || []);
+      const imagesToPreserve = existingImageUrls.filter(url => !newColorBlockImages.includes(url));
+      
+      if (imagesToPreserve.length > 0) {
+        console.log('Preserving images not in new color blocks:', imagesToPreserve);
+        for (const imageUrl of imagesToPreserve) {
+          const productImage = this.productImageRepository.create({
+            product_id: product.id,
+            url: imageUrl
+          });
+          await this.productImageRepository.save(productImage);
+        }
+      }
     }
 
-    // Handle product images update if provided
+    // Handle product images update if provided (only if no color blocks or if images are different)
     if (images && images.length > 0) {
-      // Remove existing images for this product
-      await this.productImageRepository.delete({ product_id: product.id });
-      // Create new images
-      await this.handleProductImages(savedProduct, images);
+      // Check if these images are already processed by color blocks
+      const colorBlockImages = colorBlocks?.flatMap(block => block.images || []) || [];
+      const uniqueImages = images.filter(img => !colorBlockImages.includes(img));
+      
+      console.log('Image deduplication check (update):');
+      console.log('- Main images array:', images);
+      console.log('- Color block images:', colorBlockImages);
+      console.log('- Unique images (not in color blocks):', uniqueImages);
+      
+      if (uniqueImages.length > 0) {
+        // Remove existing images for this product
+        await this.productImageRepository.delete({ product_id: product.id });
+        // Create new images
+        await this.handleProductImages(savedProduct, uniqueImages);
+      } else {
+        console.log('All images already processed by color blocks, skipping main images update');
+      }
     }
+    
+    // Log final image count after update
+    const finalImageCount = await this.productImageRepository.count({ 
+      where: { product_id: product.id } 
+    });
+    console.log(`Final image count for product ${product.id} after update: ${finalImageCount}`);
 
     return this.findOne(savedProduct.id);
   }

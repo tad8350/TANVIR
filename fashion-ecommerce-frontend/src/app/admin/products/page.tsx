@@ -17,12 +17,13 @@ import {
   Search, Edit, Trash2, Eye, MoreHorizontal, Filter,
   Calendar, Building, Globe, Phone, Mail as MailIcon,
   Star, TrendingDown, Users as UsersIcon, ShoppingCart,
-  RefreshCw, Image, Hash, Palette, Info
+  RefreshCw, Image, Hash, Palette, Info, Upload
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { apiService, ProductFormData } from "@/lib/api";
 import { toast } from "sonner";
 import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
+import { uploadImageToCloudinary } from "@/lib/cloudinary";
 
 interface Product {
   id: number;
@@ -74,6 +75,7 @@ interface Product {
     is_active: boolean;
     color?: { name: string };
     size?: { name: string };
+    images?: (string | File)[];
   }>;
   tags?: string[];
   rating?: number;
@@ -137,15 +139,28 @@ export default function ProductsPage() {
   
   // Variant management states
   const [showAddVariant, setShowAddVariant] = useState(false);
-  const [newVariant, setNewVariant] = useState({
+  
+  // Variant image management states
+  const [variantImagePreviews, setVariantImagePreviews] = useState<Record<string, Array<{ file: File | null; preview: string }>>>({});
+  const [newVariantImages, setNewVariantImages] = useState<File[]>([]);
+  
+  // Color block management for variants (like add product form)
+  const [newColorBlock, setNewColorBlock] = useState({
+    id: 'new',
     color: '',
-    size: '',
-    stock: 0,
-    lowStockThreshold: 10,
-    basePrice: '',
-    salePrice: '',
-    costPrice: ''
+    newColor: '',
+    images: [] as (File | string)[],
+    sizes: [] as Array<{
+      id: string;
+      size: string;
+      quantity: string;
+      lowStockThreshold: string;
+      basePrice: string;
+      salePrice: string;
+      costPrice: string;
+    }>
   });
+  
   const [availableColors] = useState([
     'Red', 'Blue', 'Green', 'Black', 'White', 'Gray', 'Navy', 'Brown', 
     'Pink', 'Purple', 'Yellow', 'Orange', 'Beige', 'Maroon', 'Teal', 
@@ -168,6 +183,23 @@ export default function ProductsPage() {
       sessionStorage.removeItem('products_page_navigated_away');
     };
   }, [router]);
+
+  // Debug: Log selected product changes for edit modal
+  useEffect(() => {
+    if (selectedProduct && editModalOpen) {
+      console.log('Edit Modal - Selected Product Category Data:', {
+        category: selectedProduct.category,
+        category_level1: selectedProduct.category_level1,
+        category_level2: selectedProduct.category_level2,
+        category_level3: selectedProduct.category_level3,
+        category_level4: selectedProduct.category_level4,
+        categoryLevel1: selectedProduct.categoryLevel1,
+        categoryLevel2: selectedProduct.categoryLevel2,
+        categoryLevel3: selectedProduct.categoryLevel3,
+        categoryLevel4: selectedProduct.categoryLevel4
+      });
+    }
+  }, [selectedProduct, editModalOpen]);
 
   // Add focus event listener to refresh products when returning to the page
   useEffect(() => {
@@ -505,6 +537,52 @@ export default function ProductsPage() {
         }));
       }
       
+      // Ensure category fields are properly set for the edit form
+      // Extract category data from the category string if individual fields are missing
+      if (cleanedProduct.category) {
+        const categoryParts = cleanedProduct.category.split(' → ');
+        console.log('Extracting category parts from:', cleanedProduct.category, 'Parts:', categoryParts);
+        
+        if (categoryParts.length >= 1) {
+          cleanedProduct.category_level1 = categoryParts[0].toLowerCase();
+          cleanedProduct.categoryLevel1 = categoryParts[0].toLowerCase();
+        }
+        if (categoryParts.length >= 2) {
+          cleanedProduct.category_level2 = categoryParts[1].toLowerCase();
+          cleanedProduct.categoryLevel2 = categoryParts[1].toLowerCase();
+        }
+        if (categoryParts.length >= 3) {
+          cleanedProduct.category_level3 = categoryParts[2].toLowerCase();
+          cleanedProduct.categoryLevel3 = categoryParts[2].toLowerCase();
+        }
+        if (categoryParts.length >= 4) {
+          cleanedProduct.category_level4 = categoryParts[3].toLowerCase();
+          cleanedProduct.categoryLevel4 = categoryParts[3].toLowerCase();
+        }
+      }
+      
+      // Also try to extract from other category field formats if the main category string is empty
+      if (!cleanedProduct.category && (cleanedProduct.category_level1 || cleanedProduct.categoryLevel1)) {
+        // Build category string from individual fields
+        const parts = [];
+        if (cleanedProduct.category_level1 || cleanedProduct.categoryLevel1) {
+          parts.push(cleanedProduct.category_level1 || cleanedProduct.categoryLevel1);
+        }
+        if (cleanedProduct.category_level2 || cleanedProduct.categoryLevel2) {
+          parts.push(cleanedProduct.category_level2 || cleanedProduct.categoryLevel2);
+        }
+        if (cleanedProduct.category_level3 || cleanedProduct.categoryLevel3) {
+          parts.push(cleanedProduct.category_level3 || cleanedProduct.categoryLevel3);
+        }
+        if (cleanedProduct.category_level4 || cleanedProduct.categoryLevel4) {
+          parts.push(cleanedProduct.category_level4 || cleanedProduct.categoryLevel4);
+        }
+        
+        if (parts.length > 0) {
+          cleanedProduct.category = parts.join(' → ');
+        }
+      }
+      
       // Debug: Log category data to see what's available
       console.log('Product category data for edit:', {
         category_level1: cleanedProduct.category_level1,
@@ -532,15 +610,11 @@ export default function ProductsPage() {
       setEditModalOpen(true);
       // Reset variant management state
       setShowAddVariant(false);
-      setNewVariant({
-        color: '',
-        size: '',
-        stock: 0,
-        lowStockThreshold: 10,
-        basePrice: '',
-        salePrice: '',
-        costPrice: ''
-      });
+      // Clear variant image previews
+      setVariantImagePreviews(prev => ({
+        ...prev,
+        'new': []
+      }));
     }
   };
 
@@ -569,6 +643,89 @@ export default function ProductsPage() {
     if (!selectedProduct) return;
     
     try {
+      // First, upload any new variant images to Cloudinary
+      const uploadedImages: string[] = [];
+      let uploadErrors = 0;
+      
+      // Process new variants (those with negative IDs) to upload their images
+      if (selectedProduct.variants && Array.isArray(selectedProduct.variants)) {
+        const newVariants = selectedProduct.variants.filter(variant => variant.id < 0);
+        
+        if (newVariants.length > 0) {
+          toast.info(`Uploading ${newVariants.length} new variant(s) with images to Cloudinary...`);
+        }
+        
+        for (const variant of newVariants) {
+          if (variant.images && Array.isArray(variant.images)) {
+            for (const image of variant.images) {
+              try {
+                if (image && typeof image === 'object' && 'name' in image && image instanceof File) {
+                  // Upload new file to Cloudinary
+                  const uploadResult = await uploadImageToCloudinary(image, 'fashion-ecommerce/products');
+                  uploadedImages.push(uploadResult.secure_url);
+                  
+                  // Update the variant with the uploaded URL
+                  const imageIndex = variant.images.indexOf(image);
+                  if (imageIndex !== -1) {
+                    variant.images[imageIndex] = uploadResult.secure_url;
+                  }
+                  
+                  console.log(`Successfully uploaded image for variant ${variant.color?.name}-${variant.size?.name}:`, uploadResult.secure_url);
+                } else if (typeof image === 'string' && image.startsWith('http')) {
+                  // Already a URL, keep it
+                  uploadedImages.push(image);
+                }
+              } catch (error) {
+                console.error('Error uploading variant image:', error);
+                uploadErrors++;
+                toast.error(`Failed to upload image for variant ${variant.color?.name}-${variant.size?.name}. Please try again.`);
+              }
+            }
+          }
+        }
+        
+        if (uploadErrors > 0) {
+          toast.warning(`${uploadErrors} image(s) failed to upload. The product will be saved without these images.`);
+        }
+      }
+      
+      // Also upload any new color block images that might have been added
+      if (selectedProduct.variants && Array.isArray(selectedProduct.variants)) {
+        // Look for variants with new images (File objects)
+        for (const variant of selectedProduct.variants) {
+          if (variant.images && Array.isArray(variant.images)) {
+            for (const image of variant.images) {
+              if (image instanceof File) {
+                try {
+                  const uploadResult = await uploadImageToCloudinary(image, 'fashion-ecommerce/products');
+                  // Update the variant with the uploaded URL
+                  const imageIndex = variant.images.indexOf(image);
+                  if (imageIndex !== -1) {
+                    variant.images[imageIndex] = uploadResult.secure_url;
+                  }
+                  console.log(`Successfully uploaded new image for variant ${variant.color?.name}-${variant.size?.name}:`, uploadResult.secure_url);
+                } catch (error) {
+                  console.error('Error uploading new variant image:', error);
+                  uploadErrors++;
+                  toast.error(`Failed to upload new image for variant ${variant.color?.name}-${variant.size?.name}. Please try again.`);
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Clean up any File objects that might still exist in variants
+      // This ensures we only send URLs to the backend
+      if (selectedProduct.variants && Array.isArray(selectedProduct.variants)) {
+        selectedProduct.variants.forEach(variant => {
+          if (variant.images && Array.isArray(variant.images)) {
+            variant.images = variant.images.filter(img => 
+              typeof img === 'string' && img.trim() !== ''
+            );
+          }
+        });
+      }
 
       // Collect all form values from the controlled inputs
       // Use field names that match the ProductFormData interface
@@ -598,7 +755,7 @@ export default function ProductsPage() {
         hasVariants: (selectedProduct.variants && selectedProduct.variants.length > 0) || false,
         variantType: 'color-size', // Default variant type for fashion products
         tags: selectedProduct.tags || [],
-        images: selectedProduct.images || []
+        images: [] // Empty array - images are handled through colorBlocks only
       };
 
       // Convert variants to colorBlocks format that the backend expects
@@ -606,6 +763,7 @@ export default function ProductsPage() {
         // Group variants by color to create colorBlocks
         const colorGroups = new Map();
         
+        // First pass: create color blocks and collect sizes
         formData.variants.forEach(variant => {
           const colorName = variant.color?.name || 'Unknown';
           const sizeName = variant.size?.name || 'Unknown';
@@ -614,7 +772,8 @@ export default function ProductsPage() {
             colorGroups.set(colorName, {
               color: colorName,
               newColor: colorName,
-              sizes: []
+              sizes: [],
+              images: [] // Initialize empty images array
             });
           }
           
@@ -629,6 +788,46 @@ export default function ProductsPage() {
           });
         });
         
+        // Second pass: associate existing product images with color blocks
+        // This ensures we preserve images from previous saves
+        if (selectedProduct.images && Array.isArray(selectedProduct.images)) {
+          console.log('Found existing product images:', selectedProduct.images);
+          
+          // For now, associate all existing images with the first color block
+          // In a more sophisticated system, you might want to associate images based on color
+          const firstColorBlock = Array.from(colorGroups.values())[0];
+          if (firstColorBlock) {
+            selectedProduct.images.forEach(imageObj => {
+              if (imageObj.url && typeof imageObj.url === 'string') {
+                firstColorBlock.images.push(imageObj.url);
+                console.log(`Added existing image to ${firstColorBlock.color}:`, imageObj.url);
+              }
+            });
+          }
+        }
+        
+        // Third pass: add any new images from variants
+        formData.variants.forEach(variant => {
+          const colorName = variant.color?.name || 'Unknown';
+          const colorBlock = colorGroups.get(colorName);
+          
+          if (colorBlock && variant.images && Array.isArray(variant.images)) {
+            variant.images.forEach((image: string | File) => {
+              // Only add if it's a valid image and not already included
+              if (image && !colorBlock.images.includes(image)) {
+                // If it's a File object, we need to handle it differently
+                if (image instanceof File) {
+                  // For now, skip File objects in edit mode - they should be pre-uploaded
+                  console.warn('File object found in edit mode, skipping:', image.name);
+                } else if (typeof image === 'string' && image.trim()) {
+                  colorBlock.images.push(image);
+                  console.log(`Added new image to ${colorBlock.color}:`, image);
+                }
+              }
+            });
+          }
+        });
+        
         // Convert to array format
         const colorBlocks = Array.from(colorGroups.values());
         
@@ -637,6 +836,12 @@ export default function ProductsPage() {
         formData.colorBlocks = colorBlocks;
         
         console.log('Converted variants to colorBlocks:', colorBlocks);
+        
+        // Debug: Show images for each color block
+        colorBlocks.forEach(block => {
+          console.log(`Color block ${block.color}: ${block.images.length} images`);
+          console.log(`Images for ${block.color}:`, block.images);
+        });
       }
 
       // Filter out empty values and ensure proper data types
@@ -656,11 +861,41 @@ export default function ProductsPage() {
       console.log('Form data to update:', filteredFormData);
       console.log('All variants (including temporary):', selectedProduct.variants);
       console.log('Converted colorBlocks for backend:', formData.colorBlocks);
+      console.log('Uploaded images:', uploadedImages);
+      
+      // Debug: Log image data being sent
+      console.log('Image data being sent to backend (edit mode):');
+      console.log('- Main images array (empty to avoid duplication):', filteredFormData.images);
+      console.log('- Color blocks with images:', formData.colorBlocks?.map(block => ({
+        color: block.color,
+        imageCount: block.images?.length || 0,
+        images: block.images
+      })));
 
       // Call API to update product
       await apiService.updateProduct(selectedProduct.id, filteredFormData);
       
-      toast.success('Product updated successfully!');
+      // Clean up temporary variants (those with negative IDs) after successful save
+      if (selectedProduct.variants && Array.isArray(selectedProduct.variants)) {
+        const updatedVariants = selectedProduct.variants.map(variant => {
+          if (variant.id < 0) {
+            // Convert temporary variant to permanent by generating a new positive ID
+            return {
+              ...variant,
+              id: Date.now() + Math.random() * 1000, // Generate a new positive ID
+              images: variant.images?.map(img => 
+                typeof img === 'string' ? img : img instanceof File ? '' : img
+              ).filter(Boolean) // Remove any remaining File objects
+            };
+          }
+          return variant;
+        });
+        
+        // Update the selected product with cleaned variants
+        setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } : null);
+      }
+      
+      toast.success('Product updated successfully! All new variants and images have been saved.');
       
       // Refresh the products list
       await loadProducts();
@@ -669,6 +904,21 @@ export default function ProductsPage() {
       setEditModalOpen(false);
       setSelectedProduct(null);
       
+      // Clean up variant management state
+      setShowAddVariant(false);
+      setNewColorBlock({
+        id: 'new',
+        color: '',
+        newColor: '',
+        images: [],
+        sizes: []
+      });
+      
+      // Clear variant image previews
+      setVariantImagePreviews(prev => ({
+        ...prev,
+        'new': []
+      }));
     } catch (error) {
       console.error('Error updating product:', error);
       toast.error('Failed to update product. Please try again.');
@@ -676,111 +926,119 @@ export default function ProductsPage() {
   };
 
   // Variant management functions
-  const handleAddNewVariant = () => {
+  const handleAddNewColorVariant = () => {
     setShowAddVariant(true);
-    setNewVariant({
+    setNewColorBlock({
+      id: 'new',
       color: '',
-      size: '',
-      stock: 0,
-      lowStockThreshold: 10,
-      basePrice: '',
-      salePrice: '',
-      costPrice: ''
+      newColor: '',
+      images: [],
+      sizes: []
     });
   };
 
-  const handleSaveNewVariant = async () => {
-    if (!selectedProduct || !newVariant.color || !newVariant.size) {
-      toast.error('Please fill in all required fields for the new variant.');
+  const handleSaveNewColorVariant = async () => {
+    if (!selectedProduct || !newColorBlock.color || newColorBlock.sizes.length === 0) {
+      toast.error('Please select a color and add at least one size.');
+      return;
+    }
+
+    // Validate that all sizes have required fields
+    const invalidSizes = newColorBlock.sizes.filter(size => 
+      !size.size || !size.quantity || !size.basePrice
+    );
+    
+    if (invalidSizes.length > 0) {
+      toast.error('Please fill in all required fields for each size (size, quantity, and base price).');
       return;
     }
 
     try {
-      // Check if variant already exists
-      const existingVariant = selectedProduct.variants?.find(
-        v => v.color?.name === newVariant.color && v.size?.name === newVariant.size
+      // Check if color already exists
+      const existingColor = selectedProduct.variants?.find(
+        v => v.color?.name === newColorBlock.color
       );
 
-      if (existingVariant) {
-        toast.error('This color/size combination already exists for this product.');
+      if (existingColor) {
+        toast.error('This color already exists for this product. Please use a different color.');
         return;
       }
 
-      // Generate new variant SKU
-      // Use the product's base SKU and append color and size
+      // Generate base SKU for the color
       const baseSku = selectedProduct.sku || 'PROD';
-      
-      // Clean the base SKU to remove any existing variant suffixes
       const cleanBaseSku = baseSku.split('-').slice(0, 1).join('-');
       
-      const newVariantSku = `${cleanBaseSku}-${newVariant.color.toUpperCase()}-${newVariant.size.toUpperCase()}`;
-      
-      console.log('SKU Generation:', {
-        baseSku: cleanBaseSku,
-        color: newVariant.color.toUpperCase(),
-        size: newVariant.size.toUpperCase(),
-        finalSku: newVariantSku
+      // Create new variants for each size
+      const newVariants = newColorBlock.sizes.map(size => {
+        const variantSku = `${cleanBaseSku}-${newColorBlock.color.toUpperCase()}-${size.size.toUpperCase()}`;
+        
+        return {
+          id: -(Date.now() + Math.random()), // Use negative timestamp + random as temporary ID
+          product_id: selectedProduct.id,
+          color_id: 0, // Temporary color_id
+          size_id: 0, // Temporary size_id
+          stock: parseInt(size.quantity) || 0,
+          lowStockThreshold: parseInt(size.lowStockThreshold) || 10,
+          price: size.basePrice || '0',
+          discount_price: size.salePrice || '0',
+          cost_price: size.costPrice || '0',
+          sku: variantSku,
+          is_active: true,
+          color: { name: newColorBlock.color },
+          size: { name: size.size },
+          images: newColorBlock.images // Include the images for this color
+        };
       });
 
-      // Create new variant object for immediate UI display
-      const newVariantObject = {
-        id: -(Date.now()), // Use negative timestamp as temporary ID to avoid conflicts
-        product_id: selectedProduct.id,
-        color_id: 0, // Temporary color_id
-        size_id: 0, // Temporary size_id
-        stock: newVariant.stock,
-        lowStockThreshold: newVariant.lowStockThreshold,
-        price: newVariant.basePrice || '0',
-        discount_price: newVariant.salePrice || '0',
-        cost_price: newVariant.costPrice || '0',
-        sku: newVariantSku,
-        is_active: true,
-        color: { name: newVariant.color },
-        size: { name: newVariant.size }
-      };
-
-      // Add new variant to the product's variants array immediately
+      // Add new variants to the product's variants array immediately
       const updatedVariants = [
         ...(selectedProduct.variants || []),
-        newVariantObject
+        ...newVariants
       ];
 
-      // Update the selected product state to show the new variant immediately
+      // Update the selected product state to show the new variants immediately
       setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } as Product : null);
       
-      toast.success('New variant added successfully! You can now see it in the list below.');
+      toast.success(`Added ${newVariants.length} new variant(s) for color ${newColorBlock.color}!`);
       
       // Reset form and hide add variant section
       setShowAddVariant(false);
-      setNewVariant({
+      setNewColorBlock({
+        id: 'new',
         color: '',
-        size: '',
-        stock: 0,
-        lowStockThreshold: 10,
-        basePrice: '',
-        salePrice: '',
-        costPrice: ''
+        newColor: '',
+        images: [],
+        sizes: []
       });
       
-      // Note: Variant is now visible in the UI and will be saved when you click "Save Changes"
+      // Clear variant image previews
+      setVariantImagePreviews(prev => ({
+        ...prev,
+        'new': []
+      }));
+      
+      // Note: Variants are now visible in the UI and will be saved when you click "Save Changes"
       
     } catch (error) {
-      console.error('Error adding new variant:', error);
-      toast.error('Failed to add new variant. Please try again.');
+      console.error('Error adding new variants:', error);
+      toast.error('Failed to add new variants. Please try again.');
     }
   };
 
   const handleCancelAddVariant = () => {
     setShowAddVariant(false);
-    setNewVariant({
+    setNewColorBlock({
+      id: 'new',
       color: '',
-      size: '',
-      stock: 0,
-      lowStockThreshold: 10,
-      basePrice: '',
-      salePrice: '',
-      costPrice: ''
+      newColor: '',
+      images: [],
+      sizes: []
     });
+    // Clear variant image previews
+    setVariantImagePreviews(prev => ({
+      ...prev,
+      'new': []
+    }));
   };
 
   const handleVariantUpdate = async (variantId: number, field: string, value: any) => {
@@ -826,7 +1084,113 @@ export default function ProductsPage() {
     }
   };
 
+  // Handle variant image upload (creates previews, doesn't upload to Cloudinary yet)
+  const handleVariantImageUpload = (files: File[]) => {
+    console.log(`Uploading ${files.length} files for new color block:`, files);
+    
+    const newImages: Array<{ file: File; preview: string }> = [];
+    
+    files.forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const preview = e.target?.result as string;
+          newImages.push({ file, preview });
+          
+          // Update state when all files are processed
+          if (newImages.length === files.length) {
+            console.log('All files processed, updating state with previews:', newImages);
+            
+            setVariantImagePreviews(prev => ({
+              ...prev,
+              'new': [...(prev['new'] || []), ...newImages]
+            }));
+            
+            // Also update the newColorBlock state to store the files
+            setNewColorBlock(prev => ({
+              ...prev,
+              images: [...prev.images, ...files]
+            }));
+            
+            toast.success(`${files.length} image(s) added to this color block`);
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        toast.error(`${file.name} is not an image file`);
+      }
+    });
+  };
 
+  // Handle existing variant image upload (for edit mode)
+  const handleExistingVariantImageUpload = (variantId: number, files: File[]) => {
+    console.log(`Uploading ${files.length} files for existing variant ${variantId}:`, files);
+    
+    if (!selectedProduct) return;
+    
+    // Find the variant and add the files to its images array
+    const updatedVariants = selectedProduct.variants?.map(variant => {
+      if (variant.id === variantId) {
+        return {
+          ...variant,
+          images: [...(variant.images || []), ...files]
+        };
+      }
+      return variant;
+    });
+    
+    setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } : null);
+    toast.success(`${files.length} image(s) added to variant. Images will be uploaded when you save changes.`);
+  };
+
+  // Handle adding image URL to variant
+  const handleVariantImageUrlAdd = (url: string) => {
+    // Create a preview for the URL
+    setVariantImagePreviews(prev => ({
+      ...prev,
+      'new': [...(prev['new'] || []), { file: null, preview: url }]
+    }));
+    
+    // Store the URL in newColorBlock state
+    setNewColorBlock(prev => ({
+      ...prev,
+      images: [...prev.images, url]
+    }));
+  };
+
+  // Handle adding image URL to existing variant (for edit mode)
+  const handleExistingVariantImageUrlAdd = (variantId: number, url: string) => {
+    console.log(`Adding image URL to existing variant ${variantId}:`, url);
+    
+    if (!selectedProduct) return;
+    
+    // Find the variant and add the URL to its images array
+    const updatedVariants = selectedProduct.variants?.map(variant => {
+      if (variant.id === variantId) {
+        return {
+          ...variant,
+          images: [...(variant.images || []), url]
+        };
+      }
+      return variant;
+    });
+    
+    setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } : null);
+    toast.success('Image URL added to variant. Changes will be saved when you click "Save Changes".');
+  };
+
+  // Remove image from variant
+  const removeVariantImage = (imageIndex: number) => {
+    setVariantImagePreviews(prev => ({
+      ...prev,
+      'new': prev['new']?.filter((_, index) => index !== imageIndex) || []
+    }));
+    
+    setNewColorBlock(prev => ({
+      ...prev,
+      images: prev.images.filter((_, index) => index !== imageIndex)
+    }));
+  };
 
   const handleCategoryFilterChange = (value: string) => {
     setCategoryFilter(value);
@@ -1016,6 +1380,26 @@ export default function ProductsPage() {
     return '';
   };
 
+  // Helper function to get category field value with fallbacks
+  const getCategoryFieldValue = (product: Product, fieldName: string): string => {
+    const snakeCase = fieldName as keyof Product;
+    const camelCase = (fieldName.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()) as keyof Product);
+    
+    // Try snake_case first, then camelCase, then extract from category string
+    let value = (product[snakeCase] as string) || (product[camelCase] as string) || '';
+    
+    // If still no value, try to extract from category string
+    if (!value && product.category) {
+      const categoryParts = product.category.split(' → ');
+      const fieldIndex = parseInt(fieldName.split('_').pop() || '1') - 1;
+      if (categoryParts[fieldIndex]) {
+        value = categoryParts[fieldIndex].toLowerCase();
+      }
+    }
+    
+    return value;
+  };
+
   // Get clean base SKU from product or extract from first variant
   const getProductSKU = (product: Product) => {
     if (product.sku && product.sku !== 'No SKU') {
@@ -1034,6 +1418,38 @@ export default function ProductsPage() {
     }
     
     return 'No SKU';
+  };
+
+  // Color block management functions
+  const addSizeToColorBlock = () => {
+    setNewColorBlock(prev => ({
+      ...prev,
+      sizes: [...prev.sizes, {
+        id: Date.now().toString(),
+        size: '',
+        quantity: '0',
+        lowStockThreshold: '10',
+        basePrice: '',
+        salePrice: '',
+        costPrice: ''
+      }]
+    }));
+  };
+
+  const removeSizeFromColorBlock = (sizeId: string) => {
+    setNewColorBlock(prev => ({
+      ...prev,
+      sizes: prev.sizes.filter(size => size.id !== sizeId)
+    }));
+  };
+
+  const updateSizeInColorBlock = (sizeId: string, field: string, value: string) => {
+    setNewColorBlock(prev => ({
+      ...prev,
+      sizes: prev.sizes.map(size => 
+        size.id === sizeId ? { ...size, [field]: value } : size
+      )
+    }));
   };
 
   return (
@@ -1766,39 +2182,178 @@ export default function ProductsPage() {
                   <h3 className="text-lg font-semibold mb-3">Product Variants</h3>
                   <div className="space-y-3">
                     {selectedProduct.variants.map((variant, index) => (
-                      <div key={variant.id} className="border rounded-lg p-3 bg-gray-50">
-                        <div className="grid grid-cols-4 gap-4 text-sm">
-                          <div>
-                            <Label className="text-xs font-medium text-gray-700">Color</Label>
-                            <p className="text-gray-900">{variant.color?.name || 'Unknown'}</p>
+                      <div key={variant.id} className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="font-semibold text-gray-900 text-lg">
+                              Color: {variant.color?.name || 'Unknown'} | Size: {variant.size?.name || 'Unknown'}
+                            </h4>
+                            {variant.id < 0 && (
+                              <Badge className="bg-yellow-100 text-yellow-800 text-xs">
+                                New (Temporary)
+                              </Badge>
+                            )}
                           </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleVariantDelete(variant.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-4">
                           <div>
-                            <Label className="text-xs font-medium text-gray-700">Size</Label>
-                            <p className="text-gray-900">{variant.size?.name || 'Unknown'}</p>
+                            <Label className="block mb-2 text-sm font-medium">Stock Quantity</Label>
+                            <Input
+                              type="number"
+                              value={variant.stock}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'stock', parseInt(e.target.value) || 0)}
+                              className="h-10 w-full"
+                            />
                           </div>
+                          
                           <div>
-                            <Label className="text-xs font-medium text-gray-700">Stock</Label>
-                            <p className="text-gray-900">{variant.stock}</p>
+                            <Label className="block mb-2 text-sm font-medium">Low Stock Threshold</Label>
+                            <Input
+                              type="number"
+                              value={variant.lowStockThreshold || 0}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'lowStockThreshold', parseInt(e.target.value) || 0)}
+                              className="h-10 w-full"
+                            />
                           </div>
+                          
                           <div>
-                            <Label className="text-xs font-medium text-gray-700">Price</Label>
-                            <p className="text-gray-900">${variant.price || '0'}</p>
+                            <Label className="block mb-2 text-sm font-medium">Base Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'price', e.target.value)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Sale Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.discount_price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'discount_price', e.target.value)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Cost Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.cost_price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'cost_price', e.target.value)}
+                              className="h-10 w-full"
+                            />
                           </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-4 mt-2 text-sm">
-                          <div>
-                            <Label className="text-xs font-medium text-gray-700">Low Stock Threshold</Label>
-                            <p className="text-gray-900">{variant.lowStockThreshold || 'Not set'}</p>
-                          </div>
-                          <div>
-                            <Label className="text-xs font-medium text-gray-700">SKU</Label>
-                            <p className="text-gray-900">{variant.sku}</p>
-                          </div>
-                          <div>
-                            <Label className="text-xs font-medium text-gray-700">Status</Label>
-                            <Badge className={variant.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                              {variant.is_active ? 'Active' : 'Inactive'}
-                            </Badge>
+                        
+                        <div className="mt-4">
+                          <Label className="block mb-2 text-sm font-medium">SKU</Label>
+                          <Input
+                            value={variant.sku}
+                            onChange={(e) => handleVariantUpdate(variant.id, 'sku', e.target.value)}
+                            className="h-10 w-full"
+                          />
+                        </div>
+                        
+                        {/* Variant Images Display */}
+                        <div className="mt-4">
+                          <Label className="block mb-2 text-sm font-medium">Variant Images</Label>
+                          {variant.images && Array.isArray(variant.images) && variant.images.length > 0 ? (
+                            <div className="grid grid-cols-4 gap-2">
+                              {variant.images.map((image, index) => (
+                                <div key={index} className="relative group">
+                                  <img
+                                    src={typeof image === 'string' ? image : URL.createObjectURL(image)}
+                                    alt={`Variant ${index + 1}`}
+                                    className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-500 italic">
+                              No images for this variant.
+                            </div>
+                          )}
+                          
+                          {/* Add Images to Existing Variant */}
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <Label className="block mb-2 text-sm font-medium text-gray-600">Add More Images</Label>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                              <div className="w-full">
+                                <input
+                                  type="file"
+                                  id={`existing-variant-file-${variant.id}`}
+                                  onChange={(e) => {
+                                    const files = e.target.files;
+                                    if (files) {
+                                      handleVariantImageUpload(Array.from(files));
+                                    }
+                                  }}
+                                  accept="image/*"
+                                  multiple
+                                  className="hidden"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const fileInput = document.getElementById(`existing-variant-file-${variant.id}`) as HTMLInputElement;
+                                    fileInput?.click();
+                                  }}
+                                  className="border-gray-300 hover:bg-gray-50 h-10 w-full text-sm"
+                                >
+                                  <Upload className="h-4 w-4 mr-2" />
+                                  Add Files
+                                </Button>
+                              </div>
+                              
+                              <div className="w-full">
+                                <div className="flex space-x-2">
+                                  <Input
+                                    placeholder="Enter image URL"
+                                    className="h-10 flex-1"
+                                    onKeyPress={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        const input = e.target as HTMLInputElement;
+                                        if (input.value.trim()) {
+                                          handleVariantImageUrlAdd(input.value.trim());
+                                          input.value = '';
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                      if (input.value.trim()) {
+                                        handleVariantImageUrlAdd(input.value.trim());
+                                        input.value = '';
+                                      }
+                                    }}
+                                    className="h-10 text-sm"
+                                  >
+                                    Add
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1893,15 +2448,18 @@ export default function ProductsPage() {
                   setEditModalOpen(false);
                   // Reset variant management state
                   setShowAddVariant(false);
-                  setNewVariant({
+                  setNewColorBlock({
+                    id: 'new',
                     color: '',
-                    size: '',
-                    stock: 0,
-                    lowStockThreshold: 10,
-                    basePrice: '',
-                    salePrice: '',
-                    costPrice: ''
+                    newColor: '',
+                    images: [],
+                    sizes: []
                   });
+                  // Clear variant image previews
+                  setVariantImagePreviews(prev => ({
+                    ...prev,
+                    'new': []
+                  }));
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -1910,6 +2468,30 @@ export default function ProductsPage() {
             </div>
 
             <div className="space-y-8">
+              {/* Debug Information Section */}
+              {debugMode && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-yellow-800 mb-2">Debug: Category Data</h3>
+                  <div className="grid grid-cols-2 gap-4 text-xs text-yellow-700">
+                    <div>
+                      <strong>Category String:</strong> {selectedProduct.category || 'undefined'}
+                    </div>
+                    <div>
+                      <strong>Category Level 1:</strong> {getCategoryFieldValue(selectedProduct, 'category_level1')} (raw: {selectedProduct.category_level1 || selectedProduct.categoryLevel1 || 'undefined'})
+                    </div>
+                    <div>
+                      <strong>Category Level 2:</strong> {getCategoryFieldValue(selectedProduct, 'category_level2')} (raw: {selectedProduct.category_level2 || selectedProduct.categoryLevel2 || 'undefined'})
+                    </div>
+                    <div>
+                      <strong>Category Level 3:</strong> {getCategoryFieldValue(selectedProduct, 'category_level3')} (raw: {selectedProduct.category_level3 || selectedProduct.categoryLevel3 || 'undefined'})
+                    </div>
+                    <div>
+                      <strong>Category Level 4:</strong> {getCategoryFieldValue(selectedProduct, 'category_level4')} (raw: {selectedProduct.category_level4 || selectedProduct.categoryLevel4 || 'undefined'})
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Basic Information Section */}
               <div className="space-y-4">
                 <div className="flex items-center space-x-2 pb-2 border-b border-gray-200">
@@ -1979,11 +2561,16 @@ export default function ProductsPage() {
                 </div>
 
                 <div className="grid grid-cols-4 gap-4">
+                  {/* Category fields are read-only in edit mode */}
+                  <div className="col-span-4 mb-2">
+                    <p className="text-xs text-gray-500 italic">
+                      ℹ️ Category fields are read-only. To change categories, please create a new product.
+                    </p>
+                  </div>
+                  
                   <div className="w-full">
                     <Label htmlFor="edit-categoryLevel1" className="block mb-2 text-sm font-medium">Target Audience *</Label>
-                    <Select value={selectedProduct.category_level1 || selectedProduct.categoryLevel1 || ''} onValueChange={(value) => {
-                      setSelectedProduct(prev => prev ? { ...prev, category_level1: value, categoryLevel1: value } : null);
-                    }}>
+                    <Select value={getCategoryFieldValue(selectedProduct, 'category_level1')} disabled>
                       <SelectTrigger className="h-10 w-full">
                         <SelectValue placeholder="Select audience" />
                       </SelectTrigger>
@@ -1993,13 +2580,19 @@ export default function ProductsPage() {
                         <SelectItem value="kids">KIDS</SelectItem>
                       </SelectContent>
                     </Select>
+                    {/* Debug info */}
+                    {debugMode && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Debug: level1="{getCategoryFieldValue(selectedProduct, 'category_level1')}" | 
+                        raw: level1="{selectedProduct.category_level1 || 'undefined'}" | 
+                        level1Camel="{selectedProduct.categoryLevel1 || 'undefined'}"
+                      </p>
+                    )}
                   </div>
                   
                   <div className="w-full">
                     <Label htmlFor="edit-categoryLevel2" className="block mb-2 text-sm font-medium">Category Type *</Label>
-                    <Select value={selectedProduct.category_level2 || selectedProduct.categoryLevel2 || ''} onValueChange={(value) => {
-                      setSelectedProduct(prev => prev ? { ...prev, category_level2: value, categoryLevel2: value } : null);
-                    }}>
+                    <Select value={getCategoryFieldValue(selectedProduct, 'category_level2')} disabled>
                       <SelectTrigger className="h-10 w-full">
                         <SelectValue placeholder="Select category type" />
                       </SelectTrigger>
@@ -2009,105 +2602,87 @@ export default function ProductsPage() {
                         <SelectItem value="accessories">Accessories</SelectItem>
                       </SelectContent>
                     </Select>
+                    {/* Debug info */}
+                    {debugMode && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Debug: level2="{getCategoryFieldValue(selectedProduct, 'category_level2')}" | 
+                        raw: level2="{selectedProduct.category_level2 || 'undefined'}" | 
+                        level2Camel="{selectedProduct.categoryLevel2 || 'undefined'}"
+                      </p>
+                    )}
                   </div>
                   
                   <div className="w-full">
                     <Label htmlFor="edit-categoryLevel3" className="block mb-2 text-sm font-medium">Category Sub-Type *</Label>
-                    {(() => {
-                      const categoryValue = selectedProduct.category_level3 || selectedProduct.categoryLevel3 || extractCategoryLevel3(selectedProduct.category) || '';
-                      
-                      // Additional fallback: try to extract from category string more aggressively
-                      let fallbackValue = '';
-                      if (selectedProduct.category) {
-                        const categoryStr = selectedProduct.category.toLowerCase();
-                        if (categoryStr.includes('shirts') || categoryStr.includes('t-shirts')) {
-                          fallbackValue = 'shirts';
-                        } else if (categoryStr.includes('pants') || categoryStr.includes('jeans')) {
-                          fallbackValue = 'pants';
-                        } else if (categoryStr.includes('dresses')) {
-                          fallbackValue = 'dresses';
-                        } else if (categoryStr.includes('shoes') || categoryStr.includes('sneakers')) {
-                          fallbackValue = 'sneakers';
-                        } else if (categoryStr.includes('accessories') || categoryStr.includes('watches')) {
-                          fallbackValue = 'watches';
-                        }
-                      }
-                      
-                      const finalCategoryValue = categoryValue || fallbackValue;
-                      const categoryLevel1 = selectedProduct.category_level1 || selectedProduct.categoryLevel1 || '';
-                      const categoryLevel2 = selectedProduct.category_level2 || selectedProduct.categoryLevel2 || '';
-                      
-                      console.log('Category Sub-Type field value:', {
-                        category_level3: selectedProduct.category_level3,
-                        categoryLevel3: selectedProduct.categoryLevel3,
-                        category: selectedProduct.category,
-                        extracted: extractCategoryLevel3(selectedProduct.category),
-                        fallbackValue,
-                        finalCategoryValue,
-                        categoryLevel1,
-                        categoryLevel2,
-                        // Debug: Check all possible field variations
-                        allFields: {
-                          'category_level3': selectedProduct.category_level3,
-                          'categoryLevel3': selectedProduct.categoryLevel3,
-                          'category_level_3': (selectedProduct as any).category_level_3,
-                          'categoryLevel_3': (selectedProduct as any).categoryLevel_3
-                        }
-                      });
-                      
-                      // Dynamic category options based on selected levels (same logic as add product form)
-                      const getCategoryOptions = () => {
-                        if (!categoryLevel1 || !categoryLevel2) return [];
-                        
-                        const categoryData = {
-                          men: {
-                            clothing: ['T-shirts', 'Polo Shirts', 'Shirts', 'Hoodies', 'Pants', 'Jeans', 'Shorts', 'Jackets', 'Blazers', 'Suits'],
-                            shoes: ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sports Shoes', 'Boots', 'Sandals'],
-                            accessories: ['Watches', 'Belts', 'Wallets', 'Bags', 'Hats', 'Sunglasses', 'Ties', 'Cufflinks']
-                          },
-                          women: {
-                            clothing: ['Salwar Kameez', 'Sarees', 'Kurtis', 'T-shirts', 'Tops', 'Dresses', 'Jeans', 'Pants', 'Skirts', 'Blouses'],
-                            shoes: ['Heels', 'Flats', 'Sneakers', 'Sandals', 'Boots', 'Wedges'],
-                            accessories: ['Jewelry', 'Handbags', 'Scarves', 'Belts', 'Watches', 'Sunglasses']
-                          },
-                          kids: {
-                            clothing: ['T-shirts', 'Dresses', 'Pants', 'Shorts', 'Shirts', 'Sweaters', 'Jackets'],
-                            shoes: ['Sneakers', 'Sandals', 'Formal Shoes', 'Casual Shoes'],
-                            accessories: ['Hats', 'Belts', 'Bags', 'Watches']
-                          }
-                        };
-                        
-                        return categoryData[categoryLevel1 as keyof typeof categoryData]?.[categoryLevel2 as keyof typeof categoryData[keyof typeof categoryData]] || [];
-                      };
-                      
-                      const categoryOptions = getCategoryOptions();
-                      
-                      return (
-                        <Select value={finalCategoryValue} onValueChange={(value) => {
-                          setSelectedProduct(prev => prev ? { ...prev, category_level3: value, categoryLevel3: value } : null);
-                        }}>
-                          <SelectTrigger className="h-10 w-full">
-                            <SelectValue placeholder="Select sub-category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categoryOptions.map((option) => (
-                              <SelectItem key={option} value={option.toLowerCase()}>{option}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      );
-                    })()}
+                    <Select 
+                      value={getCategoryFieldValue(selectedProduct, 'category_level3')} 
+                      disabled
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue placeholder="Select sub-category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const categoryLevel1 = getCategoryFieldValue(selectedProduct, 'category_level1');
+                          const categoryLevel2 = getCategoryFieldValue(selectedProduct, 'category_level2');
+                          
+                          if (!categoryLevel1 || !categoryLevel2) return null;
+                          
+                          const categoryData = {
+                            men: {
+                              clothing: ['T-shirts', 'Polo Shirts', 'Shirts', 'Hoodies', 'Pants', 'Jeans', 'Shorts', 'Jackets', 'Blazers', 'Suits'],
+                              shoes: ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sports Shoes', 'Boots', 'Sandals'],
+                              accessories: ['Watches', 'Belts', 'Wallets', 'Bags', 'Hats', 'Sunglasses', 'Ties', 'Cufflinks']
+                            },
+                            women: {
+                              clothing: ['Salwar Kameez', 'Sarees', 'Kurtis', 'T-shirts', 'Tops', 'Dresses', 'Jeans', 'Pants', 'Skirts', 'Blouses'],
+                              shoes: ['Heels', 'Flats', 'Sneakers', 'Sandals', 'Boots', 'Wedges'],
+                              accessories: ['Jewelry', 'Handbags', 'Scarves', 'Belts', 'Watches', 'Sunglasses']
+                            },
+                            kids: {
+                              clothing: ['T-shirts', 'Dresses', 'Pants', 'Shorts', 'Shirts', 'Sweaters', 'Jackets'],
+                              shoes: ['Sneakers', 'Sandals', 'Formal Shoes', 'Casual Shoes'],
+                              accessories: ['Hats', 'Belts', 'Bags', 'Watches']
+                            }
+                          };
+                          
+                          const options = categoryData[categoryLevel1 as keyof typeof categoryData]?.[categoryLevel2 as keyof typeof categoryData[keyof typeof categoryData]] || [];
+                          
+                          return options.map((option) => (
+                            <SelectItem key={option} value={option.toLowerCase()}>{option}</SelectItem>
+                          ));
+                        })()}
+                      </SelectContent>
+                    </Select>
+                    {/* Debug info */}
+                    {debugMode && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Debug: level3="{getCategoryFieldValue(selectedProduct, 'category_level3')}" | 
+                        raw: level3="{selectedProduct.category_level3 || 'undefined'}" | 
+                        level3Camel="{selectedProduct.categoryLevel3 || 'undefined'}" | 
+                        category="{selectedProduct.category || 'undefined'}"
+                      </p>
+                    )}
                   </div>
                   
                   <div className="w-full">
                     <Label htmlFor="edit-categoryLevel4" className="block mb-2 text-sm font-medium">Specific Item *</Label>
                     <Input
                       id="edit-categoryLevel4"
-                      value={selectedProduct.category_level4 || selectedProduct.categoryLevel4 || ''}
-                      onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, category_level4: e.target.value, categoryLevel4: e.target.value } : null)}
+                      value={getCategoryFieldValue(selectedProduct, 'category_level4')}
+                      readOnly
+                      disabled
                       placeholder="e.g., Basic T-shirts, Printed T-shirts"
-                      className="h-10 w-full"
+                      className="h-10 w-full bg-gray-50"
                     />
+                    {/* Debug info */}
+                    {debugMode && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Debug: level4="{getCategoryFieldValue(selectedProduct, 'category_level4')}" | 
+                        raw: level4="{selectedProduct.category_level4 || 'undefined'}" | 
+                        level4Camel="{selectedProduct.categoryLevel4 || 'undefined'}"
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -2150,12 +2725,12 @@ export default function ProductsPage() {
                     <h3 className="text-sm font-semibold">Color Variants & Pricing</h3>
                   </div>
                   <Button
-                    onClick={handleAddNewVariant}
+                    onClick={handleAddNewColorVariant}
                     className="bg-green-600 hover:bg-green-700 text-white"
                     disabled={showAddVariant}
                   >
                     <Plus className="h-4 w-4 mr-2" />
-                    Add New Variant
+                    Add Color Variant
                   </Button>
                 </div>
                 
@@ -2163,7 +2738,7 @@ export default function ProductsPage() {
                 {showAddVariant && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-semibold text-blue-900 text-lg">Add New Variant</h4>
+                      <h4 className="font-semibold text-blue-900 text-lg">Add New Color Variant</h4>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -2178,99 +2753,238 @@ export default function ProductsPage() {
                     <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded">
                       <p className="text-sm text-blue-800">
                         <Info className="h-4 w-4 inline mr-2" />
-                        <strong>Note:</strong> New variants will appear immediately in the list below. Click "Save Changes" to persist them to the database.
+                        <strong>Note:</strong> Select one color and add multiple sizes. Each size can have different stock, pricing, and settings. New variants will appear immediately in the list below. Click "Save Changes" to persist them to the database.
                       </p>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Color *</Label>
-                        <Select value={newVariant.color} onValueChange={(value) => setNewVariant(prev => ({ ...prev, color: value }))}>
-                          <SelectTrigger className="h-10 w-full">
-                            <SelectValue placeholder="Select color" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableColors.map((color) => (
-                              <SelectItem key={color} value={color}>
-                                {color}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Size *</Label>
-                        <Select value={newVariant.size} onValueChange={(value) => setNewVariant(prev => ({ ...prev, size: value }))}>
-                          <SelectTrigger className="h-10 w-full">
-                            <SelectValue placeholder="Select size" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableSizes.map((size) => (
-                              <SelectItem key={size} value={size}>
-                                {size}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    {/* Color Selection */}
+                    <div className="mb-6">
+                      <Label className="block mb-2 text-sm font-medium text-blue-900">Color *</Label>
+                      <Select value={newColorBlock.color} onValueChange={(value) => setNewColorBlock(prev => ({ ...prev, color: value }))}>
+                        <SelectTrigger className="h-10 w-full">
+                          <SelectValue placeholder="Select color" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableColors.map((color) => (
+                            <SelectItem key={color} value={color}>
+                              {color}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     
-                    <div className="grid grid-cols-5 gap-4 mb-4">
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Stock Quantity</Label>
-                        <Input
-                          type="number"
-                          value={newVariant.stock}
-                          onChange={(e) => setNewVariant(prev => ({ ...prev, stock: parseInt(e.target.value) || 0 }))}
-                          className="h-10 w-full"
-                        />
+                    {/* Sizes Management */}
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <Label className="block text-sm font-medium text-blue-900">Sizes & Stock *</Label>
+                        <Button
+                          type="button"
+                          onClick={addSizeToColorBlock}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Size
+                        </Button>
                       </div>
                       
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Low Stock Threshold</Label>
-                        <Input
-                          type="number"
-                          value={newVariant.lowStockThreshold}
-                          onChange={(e) => setNewVariant(prev => ({ ...prev, lowStockThreshold: parseInt(e.target.value) || 0 }))}
-                          className="h-10 w-full"
-                        />
+                      {newColorBlock.sizes.length === 0 ? (
+                        <div className="text-center py-6 text-blue-600 border-2 border-dashed border-blue-300 rounded-lg">
+                          <p className="text-sm">No sizes added yet. Click "Add Size" to get started.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {newColorBlock.sizes.map((size, index) => (
+                            <div key={size.id} className="bg-white p-4 rounded-lg border border-blue-200">
+                              <div className="flex items-center justify-between mb-3">
+                                <h5 className="font-medium text-blue-900">Size {index + 1}</h5>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeSizeFromColorBlock(size.id)}
+                                  className="text-red-600 hover:text-red-700 h-6 w-6 p-0"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Size *</Label>
+                                  <Select value={size.size} onValueChange={(value) => updateSizeInColorBlock(size.id, 'size', value)}>
+                                    <SelectTrigger className="h-8 w-full">
+                                      <SelectValue placeholder="Select size" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {availableSizes.map((sizeOption) => (
+                                        <SelectItem key={sizeOption} value={sizeOption}>
+                                          {sizeOption}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Stock *</Label>
+                                  <Input
+                                    type="number"
+                                    value={size.quantity}
+                                    onChange={(e) => updateSizeInColorBlock(size.id, 'quantity', e.target.value)}
+                                    className="h-8 w-full"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Low Stock Threshold</Label>
+                                  <Input
+                                    type="number"
+                                    value={size.lowStockThreshold}
+                                    onChange={(e) => updateSizeInColorBlock(size.id, 'lowStockThreshold', e.target.value)}
+                                    className="h-8 w-full"
+                                    placeholder="10"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Base Price *</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.basePrice}
+                                    onChange={(e) => updateSizeInColorBlock(size.id, 'basePrice', e.target.value)}
+                                    className="h-8 w-full"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Sale Price</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.salePrice}
+                                    onChange={(e) => updateSizeInColorBlock(size.id, 'salePrice', e.target.value)}
+                                    className="h-8 w-full"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <Label className="block mb-2 text-xs font-medium text-blue-900">Cost Price</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.costPrice}
+                                    onChange={(e) => updateSizeInColorBlock(size.id, 'costPrice', e.target.value)}
+                                    className="h-8 w-full"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Image Upload Section */}
+                    <div className="mb-6">
+                      <Label className="block mb-2 text-sm font-medium text-blue-900">Color Variant Images</Label>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="w-full">
+                          <input
+                            type="file"
+                            id="variant-file-upload"
+                            onChange={(e) => {
+                              const files = e.target.files;
+                              if (files) {
+                                handleVariantImageUpload(Array.from(files));
+                              }
+                            }}
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              const fileInput = document.getElementById('variant-file-upload') as HTMLInputElement;
+                              fileInput?.click();
+                            }}
+                            className="border-blue-300 hover:bg-blue-50 h-10 w-full text-blue-700"
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            Choose Files
+                          </Button>
+                        </div>
+                        
+                        <div className="w-full">
+                          <div className="flex space-x-2">
+                            <Input
+                              placeholder="Enter image URL"
+                              className="h-10 flex-1"
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  const input = e.target as HTMLInputElement;
+                                  if (input.value.trim()) {
+                                    handleVariantImageUrlAdd(input.value.trim());
+                                    input.value = '';
+                                  }
+                                }
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={(e) => {
+                                const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                if (input.value.trim()) {
+                                  handleVariantImageUrlAdd(input.value.trim());
+                                  input.value = '';
+                                }
+                              }}
+                              className="h-10 border-blue-300 text-blue-700 hover:bg-blue-50"
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                      
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Base Price</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={newVariant.basePrice}
-                          onChange={(e) => setNewVariant(prev => ({ ...prev, basePrice: e.target.value }))}
-                          placeholder="0.00"
-                          className="h-10 w-full"
-                        />
-                      </div>
-                      
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Sale Price</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={newVariant.salePrice}
-                          onChange={(e) => setNewVariant(prev => ({ ...prev, salePrice: e.target.value }))}
-                          placeholder="0.00"
-                          className="h-10 w-full"
-                        />
-                      </div>
-                      
-                      <div>
-                        <Label className="block mb-2 text-sm font-medium text-blue-900">Cost Price</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={newVariant.costPrice}
-                          onChange={(e) => setNewVariant(prev => ({ ...prev, costPrice: e.target.value }))}
-                          placeholder="0.00"
-                          className="h-10 w-full"
-                        />
+
+                      {/* Image Previews */}
+                      <div className="mt-4">
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">
+                          Image Previews ({variantImagePreviews['new']?.length || 0} images)
+                        </Label>
+                        {variantImagePreviews['new'] && variantImagePreviews['new'].length > 0 ? (
+                          <div className="grid grid-cols-4 gap-2">
+                            {variantImagePreviews['new'].map((imageData, index) => (
+                              <div key={index} className="relative group">
+                                <img
+                                  src={imageData.preview}
+                                  alt={`Preview ${index + 1}`}
+                                  className="w-20 h-20 object-cover rounded-lg border border-blue-300"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeVariantImage(index)}
+                                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-blue-600 italic">
+                            No images uploaded yet. Upload images or add URLs above.
+                          </div>
+                        )}
                       </div>
                     </div>
                     
@@ -2283,11 +2997,11 @@ export default function ProductsPage() {
                         Cancel
                       </Button>
                       <Button
-                        onClick={handleSaveNewVariant}
+                        onClick={handleSaveNewColorVariant}
                         className="bg-blue-600 hover:bg-blue-700 text-white"
-                        disabled={!newVariant.color || !newVariant.size}
+                        disabled={!newColorBlock.color || newColorBlock.sizes.length === 0}
                       >
-                        Add Variant
+                        Add Color Variant
                       </Button>
                     </div>
                   </div>
@@ -2381,6 +3095,95 @@ export default function ProductsPage() {
                             onChange={(e) => handleVariantUpdate(variant.id, 'sku', e.target.value)}
                             className="h-10 w-full"
                           />
+                        </div>
+                        
+                        {/* Variant Images Display */}
+                        <div className="mt-4">
+                          <Label className="block mb-2 text-sm font-medium">Variant Images</Label>
+                          {variant.images && Array.isArray(variant.images) && variant.images.length > 0 ? (
+                            <div className="grid grid-cols-4 gap-2">
+                              {variant.images.map((image, index) => (
+                                <div key={index} className="relative group">
+                                  <img
+                                    src={typeof image === 'string' ? image : URL.createObjectURL(image)}
+                                    alt={`Variant ${index + 1}`}
+                                    className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-500 italic">
+                              No images for this variant.
+                            </div>
+                          )}
+                          
+                          {/* Add Images to Existing Variant */}
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <Label className="block mb-2 text-sm font-medium text-gray-600">Add More Images</Label>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                              <div className="w-full">
+                                <input
+                                  type="file"
+                                  id={`existing-variant-file-${variant.id}`}
+                                  onChange={(e) => {
+                                    const files = e.target.files;
+                                    if (files) {
+                                      handleVariantImageUpload(Array.from(files));
+                                    }
+                                  }}
+                                  accept="image/*"
+                                  multiple
+                                  className="hidden"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const fileInput = document.getElementById(`existing-variant-file-${variant.id}`) as HTMLInputElement;
+                                    fileInput?.click();
+                                  }}
+                                  className="border-gray-300 hover:bg-gray-50 h-10 w-full text-sm"
+                                >
+                                  <Upload className="h-4 w-4 mr-2" />
+                                  Add Files
+                                </Button>
+                              </div>
+                              
+                              <div className="w-full">
+                                <div className="flex space-x-2">
+                                  <Input
+                                    placeholder="Enter image URL"
+                                    className="h-10 flex-1"
+                                    onKeyPress={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        const input = e.target as HTMLInputElement;
+                                        if (input.value.trim()) {
+                                          handleVariantImageUrlAdd(input.value.trim());
+                                          input.value = '';
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                      if (input.value.trim()) {
+                                        handleVariantImageUrlAdd(input.value.trim());
+                                        input.value = '';
+                                      }
+                                    }}
+                                    className="h-10 text-sm"
+                                  >
+                                    Add
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2565,4 +3368,4 @@ export default function ProductsPage() {
       )}
     </div>
   );
-} 
+}

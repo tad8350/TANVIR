@@ -12,6 +12,9 @@ export class ProductImage {
   @Column()
   url: string;
 
+  @Column({ name: 'cloudinary_public_id', nullable: true })
+  cloudinary_public_id: string;
+
   @ManyToOne(() => Product, product => product.images)
   @JoinColumn({ name: 'product_id' })
   product: Product;

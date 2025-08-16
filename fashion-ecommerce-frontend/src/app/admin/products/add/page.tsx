@@ -54,7 +54,7 @@ export default function AddProduct() {
       id: string;
       color: string;
       newColor: string;
-      images: File[];
+      images: (File | string)[];
       // Removed color-level pricing - now handled at size level
       sizes: Array<{
         id: string;
@@ -122,6 +122,14 @@ export default function AddProduct() {
   }>({
     images: []
   });
+
+  // Add state for color block image previews
+  const [colorBlockPreviews, setColorBlockPreviews] = useState<{
+    [colorBlockId: string]: Array<{
+      file: File | null;
+      preview: string;
+    }>;
+  }>({});
 
   // Add default color block on component mount
   useEffect(() => {
@@ -377,6 +385,87 @@ export default function AddProduct() {
     }));
   };
 
+  // Handle color block image upload (creates previews, doesn't upload to Cloudinary yet)
+  const handleColorBlockImageUpload = (colorBlockId: string, files: File[]) => {
+    console.log(`Uploading ${files.length} files for color block ${colorBlockId}:`, files);
+    
+    const newImages: Array<{ file: File; preview: string }> = [];
+    
+    files.forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const preview = e.target?.result as string;
+          newImages.push({ file, preview });
+          
+          // Update state when all files are processed
+          if (newImages.length === files.length) {
+            console.log('All files processed, updating state with previews:', newImages);
+            
+            setColorBlockPreviews(prev => ({
+              ...prev,
+              [colorBlockId]: [...(prev[colorBlockId] || []), ...newImages]
+            }));
+            
+            // Also update the form data to store the files
+            setFormData(prev => ({
+              ...prev,
+              colorBlocks: prev.colorBlocks.map(block => 
+                block.id === colorBlockId 
+                  ? { ...block, images: [...(block.images || []), ...files] }
+                  : block
+              )
+            }));
+            
+            toast.success(`${files.length} image(s) added to this color block`);
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        toast.error(`${file.name} is not an image file`);
+      }
+    });
+  };
+
+  // Handle adding image URL to color block
+  const handleColorBlockImageUrlAdd = (colorBlockId: string, url: string) => {
+    // Create a preview for the URL
+    setColorBlockPreviews(prev => ({
+      ...prev,
+      [colorBlockId]: [...(prev[colorBlockId] || []), { file: null, preview: url }]
+    }));
+    
+    // Store the URL in form data
+    setFormData(prev => ({
+      ...prev,
+      colorBlocks: prev.colorBlocks.map(block => 
+        block.id === colorBlockId 
+          ? { ...block, images: [...(block.images || []), url] }
+          : block
+      )
+    }));
+  };
+
+  // Remove image from color block
+  const removeColorBlockImage = (colorBlockId: string, imageIndex: number) => {
+    setColorBlockPreviews(prev => ({
+      ...prev,
+      [colorBlockId]: prev[colorBlockId]?.filter((_, index) => index !== imageIndex) || []
+    }));
+    
+    setFormData(prev => ({
+      ...prev,
+      colorBlocks: prev.colorBlocks.map(block => 
+        block.id === colorBlockId 
+          ? { 
+              ...block, 
+              images: block.images?.filter((_, index) => index !== imageIndex) || []
+            }
+          : block
+      )
+    }));
+  };
+
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -415,7 +504,47 @@ export default function AddProduct() {
     try {
       setIsSubmitting(true);
       
-      // Prepare the data for submission
+      // Upload images to Cloudinary first
+      toast.info('Uploading images to Cloudinary...');
+      console.log('Starting Cloudinary upload for all color blocks...');
+      
+      const updatedColorBlocks = await Promise.all(
+        formData.colorBlocks.map(async (block) => {
+          console.log(`Processing color block ${block.id} (${block.color}) with ${block.images.length} images`);
+          const uploadedImages: string[] = [];
+          
+          // Upload each image file to Cloudinary
+          for (const image of block.images) {
+            if (image instanceof File) {
+              try {
+                console.log(`Uploading file to Cloudinary: ${image.name} (${image.size} bytes)`);
+                // Import the upload function dynamically to avoid issues
+                const { uploadProductImage } = await import('@/lib/cloudinary');
+                const result = await uploadProductImage(image);
+                uploadedImages.push(result.secure_url);
+                console.log(`Successfully uploaded to Cloudinary: ${result.secure_url}`);
+                toast.success(`Image uploaded: ${image.name}`);
+              } catch (error) {
+                console.error('Error uploading image:', error);
+                toast.error(`Failed to upload ${image.name}`);
+              }
+            } else if (typeof image === 'string') {
+              // It's already a URL, keep it
+              console.log(`Keeping existing URL: ${image}`);
+              uploadedImages.push(image);
+            }
+          }
+          
+          console.log(`Color block ${block.id} completed with ${uploadedImages.length} images`);
+          return {
+            ...block,
+            images: uploadedImages
+          };
+        })
+      );
+      
+      // Prepare the data for submission with uploaded image URLs
+      // Note: Images are only sent through colorBlocks to avoid duplication
       const productData = {
         name: formData.name,
         title: formData.title,
@@ -439,13 +568,13 @@ export default function AddProduct() {
         shippingWeight: formData.shippingWeight || undefined,
         // Ensure arrays are properly formatted
         tags: formData.tags || [],
-        images: formData.images || [],
+        images: [], // Empty array - images are handled through colorBlocks only
         variants: formData.variants || [],
-        colorBlocks: formData.colorBlocks.map(block => ({
+        colorBlocks: updatedColorBlocks.map(block => ({
           id: block.id,
           color: block.color,
           newColor: block.newColor,
-          images: block.images || [], // Include images array
+          images: block.images || [], // Now contains Cloudinary URLs
           sizes: block.sizes.map(size => ({
             id: size.id,
             size: size.size,
@@ -484,6 +613,30 @@ export default function AddProduct() {
         categoryLevel4: productData.categoryLevel4,
         category: productData.category
       });
+      
+      // Debug: Log image data being sent
+      console.log('Image data being sent to backend:');
+      console.log('- Main images array (empty to avoid duplication):', productData.images);
+      console.log('- Color blocks with images:', productData.colorBlocks.map(block => ({
+        color: block.color,
+        imageCount: block.images?.length || 0,
+        images: block.images
+      })));
+      
+      // Additional debugging for form data
+      console.log('Form data color blocks before processing:', formData.colorBlocks.map(block => ({
+        color: block.color,
+        imageCount: block.images?.length || 0,
+        imageTypes: block.images?.map(img => typeof img)
+      })));
+      
+      console.log('Updated color blocks after Cloudinary upload:', updatedColorBlocks.map(block => ({
+        color: block.color,
+        imageCount: block.images?.length || 0,
+        imageTypes: block.images?.map(img => typeof img),
+        sampleImages: block.images?.slice(0, 2) // Show first 2 images
+      })));
+      
       console.log('Sending product data to backend:', JSON.stringify(productData, null, 2));
       const response = await apiService.createProduct(productData);
       
@@ -1466,7 +1619,7 @@ export default function AddProduct() {
 
 
 
-                        {/* Image Upload */}
+                                                {/* Image Upload */}
                         <div className="mb-6">
                           <Label className="block mb-2 text-sm font-medium">Upload Images *</Label>
                           <div className="grid grid-cols-2 gap-4">
@@ -1475,10 +1628,9 @@ export default function AddProduct() {
                                 type="file"
                                 id={`file-upload-${colorBlock.id}`}
                                 onChange={(e) => {
-                                  const file = e.target.files?.[0] || null;
-                                  if (file) {
-                                    // Handle file upload for this specific color block
-                                    console.log('File uploaded for color block:', colorBlock.id, file);
+                                  const files = e.target.files;
+                                  if (files) {
+                                    handleColorBlockImageUpload(colorBlock.id, Array.from(files));
                                   }
                                 }}
                                 accept="image/*"
@@ -1509,7 +1661,7 @@ export default function AddProduct() {
                                       e.preventDefault();
                                       const input = e.target as HTMLInputElement;
                                       if (input.value.trim()) {
-                                        // Handle image URL addition for this color block
+                                        handleColorBlockImageUrlAdd(colorBlock.id, input.value.trim());
                                         input.value = '';
                                       }
                                     }
@@ -1521,7 +1673,7 @@ export default function AddProduct() {
                                   onClick={(e) => {
                                     const input = e.currentTarget.previousElementSibling as HTMLInputElement;
                                     if (input.value.trim()) {
-                                      // Handle image URL addition for this color block
+                                      handleColorBlockImageUrlAdd(colorBlock.id, input.value.trim());
                                       input.value = '';
                                     }
                                   }}
@@ -1531,6 +1683,37 @@ export default function AddProduct() {
                                 </Button>
                               </div>
                             </div>
+                          </div>
+
+                          {/* Image Previews */}
+                          <div className="mt-4">
+                            <Label className="block mb-2 text-sm font-medium text-gray-600">
+                              Image Previews ({colorBlockPreviews[colorBlock.id]?.length || 0} images)
+                            </Label>
+                            {colorBlockPreviews[colorBlock.id] && colorBlockPreviews[colorBlock.id].length > 0 ? (
+                              <div className="grid grid-cols-4 gap-2">
+                                {colorBlockPreviews[colorBlock.id].map((imageData, index) => (
+                                  <div key={index} className="relative group">
+                                    <img
+                                      src={imageData.preview}
+                                      alt={`Preview ${index + 1}`}
+                                      className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeColorBlockImage(colorBlock.id, index)}
+                                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-sm text-gray-500 italic">
+                                No images uploaded yet. Upload images or add URLs above.
+                              </div>
+                            )}
                           </div>
                         </div>
 

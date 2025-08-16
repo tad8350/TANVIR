@@ -26,8 +26,14 @@ export class BrandProfile {
   @Column({ name: 'logo_url', nullable: true })
   logo_url: string;
 
+  @Column({ name: 'logo_cloudinary_id', nullable: true })
+  logo_cloudinary_id: string;
+
   @Column({ name: 'banner_url', nullable: true })
   banner_url: string;
+
+  @Column({ name: 'banner_cloudinary_id', nullable: true })
+  banner_cloudinary_id: string;
 
   @Column({ name: 'website_url', nullable: true })
   website_url: string;

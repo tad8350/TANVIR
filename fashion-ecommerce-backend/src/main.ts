@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AppAuthGuard } from './auth/guards/app-auth.guard';
+import { cloudinaryConfig } from './config/cloudinary.config';
 import * as dotenv from 'dotenv';
 
 // Load environment variables from .env file
@@ -15,6 +16,9 @@ console.log('PORT:', process.env.PORT);
 console.log('DB_DATABASE:', process.env.DB_DATABASE);
 
 async function bootstrap() {
+  // Initialize Cloudinary
+  cloudinaryConfig();
+  
   const app = await NestFactory.create(AppModule);
 
   // Enable CORS
