@@ -15,11 +15,12 @@ import {
   Megaphone, Plus, Cog, MessageSquare, User, LogOut, ChevronDown,
   Clock, Plus as PlusIcon, DollarSign, Tag as TagIcon,
   ArrowLeft, Upload, Globe, Phone, Building, FileText, Eye, EyeOff, Save,
-  Image, Palette, Ruler, Hash, Trash2, Star
+  Image, Palette, Ruler, Hash, Trash2, Star, RefreshCw, Info
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { apiService } from "@/lib/api";
 import { toast } from "sonner";
+import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
 
 export default function AddProduct() {
   const router = useRouter();
@@ -48,16 +49,22 @@ export default function AddProduct() {
     status: 'active', // Set default status
     // Inventory fields
     lowStockThreshold: '',
-    // Color blocks
+    // Color blocks - restructured for size-level pricing
     colorBlocks: [] as Array<{
       id: string;
       color: string;
       newColor: string;
       images: File[];
+      // Removed color-level pricing - now handled at size level
       sizes: Array<{
         id: string;
         size: string;
         quantity: string;
+        lowStockThreshold: string;
+        // Pricing moved to size level
+        basePrice: string;
+        salePrice: string;
+        costPrice: string;
       }>;
     }>,
     // Images
@@ -99,18 +106,9 @@ export default function AddProduct() {
   });
 
   const [brandSearchTerm, setBrandSearchTerm] = useState('');
-  const [filteredBrands, setFilteredBrands] = useState([
-    'Fashion Forward',
-    'TechGear Pro',
-    'Home & Garden Co',
-    'Sports Elite',
-    'Beauty Plus',
-    'Urban Style',
-    'Classic Collection',
-    'Premium Brands',
-    'Sportswear Pro',
-    'Casual Comfort'
-  ]);
+  const [filteredBrands, setFilteredBrands] = useState<string[]>([]);
+  const [allBrands, setAllBrands] = useState<string[]>([]);
+  const [brandsLoading, setBrandsLoading] = useState(false);
 
   const [colorSearchTerm, setColorSearchTerm] = useState('');
   const [filteredColors, setFilteredColors] = useState([
@@ -131,6 +129,50 @@ export default function AddProduct() {
       addColorBlock();
     }
   }, []); // Empty dependency array means this runs once on mount
+
+  // Check authentication on component mount
+  useEffect(() => {
+    requireAdminAuth(router);
+  }, [router]);
+
+  // Load brands from database on component mount
+  useEffect(() => {
+    loadBrandsFromDatabase();
+  }, []);
+
+  // Function to load brands from database
+  const loadBrandsFromDatabase = async () => {
+    try {
+      setBrandsLoading(true);
+      const response = await apiService.getBrands(1, 100); // Get up to 100 brands
+      
+      if (response && response.data && Array.isArray(response.data)) {
+        // Extract brand names from the response
+        const brandNames = response.data.map((brand: any) => brand.brand_name || brand.name || '');
+        const validBrandNames = brandNames.filter(name => name && name.trim() !== '');
+        
+        setAllBrands(validBrandNames);
+        setFilteredBrands(validBrandNames);
+        console.log('Loaded brands from database:', validBrandNames);
+        
+        if (validBrandNames.length > 0) {
+          toast.success(`Successfully loaded ${validBrandNames.length} brand(s) from database`);
+        }
+              } else {
+          console.error('Invalid brands response format:', response);
+          setAllBrands([]);
+          setFilteredBrands([]);
+          toast.warning('No brands found in database. Please create some brands first.');
+        }
+    } catch (error) {
+      console.error('Error loading brands:', error);
+      setAllBrands([]);
+      setFilteredBrands([]);
+      toast.error('Failed to load brands from database');
+    } finally {
+      setBrandsLoading(false);
+    }
+  };
 
   const handleFileUpload = (field: string, file: File | null) => {
     if (file) {
@@ -180,9 +222,7 @@ export default function AddProduct() {
         return value.trim() === '' ? 'Product name is required' : '';
       case 'title':
         return value.trim() === '' ? 'Product title is required' : '';
-      case 'price':
-        return value.trim() === '' ? 'Price is required' : 
-               isNaN(Number(value)) ? 'Price must be a number' : '';
+
       case 'category':
         return value.trim() === '' ? 'Category is required' : '';
       case 'brand':
@@ -218,18 +258,11 @@ export default function AddProduct() {
 
   const handleBrandSearch = (searchTerm: string) => {
     setBrandSearchTerm(searchTerm);
-    const allBrands = [
-      'Fashion Forward',
-      'TechGear Pro',
-      'Home & Garden Co',
-      'Sports Elite',
-      'Beauty Plus',
-      'Urban Style',
-      'Classic Collection',
-      'Premium Brands',
-      'Sportswear Pro',
-      'Casual Comfort'
-    ];
+    
+    if (!searchTerm.trim()) {
+      setFilteredBrands(allBrands);
+      return;
+    }
     
     const filtered = allBrands.filter(brand => 
       brand.toLowerCase().includes(searchTerm.toLowerCase())
@@ -261,7 +294,11 @@ export default function AddProduct() {
       sizes: [{
         id: Date.now().toString(),
         size: '',
-        quantity: ''
+        quantity: '',
+        lowStockThreshold: '',
+        basePrice: '',
+        salePrice: '',
+        costPrice: ''
       }]
     };
     setFormData(prev => ({
@@ -286,6 +323,8 @@ export default function AddProduct() {
     }));
   };
 
+
+
   const addSizeToColorBlock = (blockId: string) => {
     setFormData(prev => ({
       ...prev,
@@ -296,7 +335,11 @@ export default function AddProduct() {
               sizes: [...block.sizes, {
                 id: Date.now().toString(),
                 size: '',
-                quantity: ''
+                quantity: '',
+                lowStockThreshold: '',
+                basePrice: '',
+                salePrice: '',
+                costPrice: ''
               }]
             }
           : block
@@ -340,7 +383,7 @@ export default function AddProduct() {
     e.preventDefault();
     
     // Basic validation - only check essential fields
-    const requiredFields = ['name', 'title', 'price', 'brand'];
+    const requiredFields = ['name', 'title', 'brand'];
     const newErrors: Record<string, string> = {};
     
     requiredFields.forEach(field => {
@@ -348,6 +391,15 @@ export default function AddProduct() {
       if (error) {
         newErrors[field] = error;
       }
+    });
+
+    // Validate that each size within each color block has a base price
+    formData.colorBlocks.forEach((block, blockIndex) => {
+      block.sizes.forEach((size, sizeIndex) => {
+        if (!size.basePrice || size.basePrice.trim() === '') {
+          newErrors[`colorBlock${blockIndex}Size${sizeIndex}Price`] = `Base price is required for ${block.color || 'color'} - ${size.size || 'size'}`;
+        }
+      });
     });
 
     // Only show errors for essential fields
@@ -369,9 +421,6 @@ export default function AddProduct() {
         title: formData.title,
         description: formData.description,
         shortDescription: formData.shortDescription,
-        price: formData.price,
-        salePrice: formData.salePrice || undefined,
-        costPrice: formData.costPrice || undefined,
         sku: formData.sku,
         barcode: formData.barcode,
         brand: formData.brand,
@@ -396,11 +445,15 @@ export default function AddProduct() {
           id: block.id,
           color: block.color,
           newColor: block.newColor,
-          images: [], // Convert File[] to empty array for now (would need file upload handling)
+          images: block.images || [], // Include images array
           sizes: block.sizes.map(size => ({
             id: size.id,
             size: size.size,
-            quantity: size.quantity || '0'
+            quantity: size.quantity || '0',
+            lowStockThreshold: size.lowStockThreshold || '0',
+            basePrice: size.basePrice || '0.00',
+            salePrice: size.salePrice || '0.00',
+            costPrice: size.costPrice || '0.00'
           }))
         })),
         // SEO & Marketing
@@ -424,6 +477,13 @@ export default function AddProduct() {
       };
 
       // Submit to API
+      console.log('Category data being sent:', {
+        categoryLevel1: productData.categoryLevel1,
+        categoryLevel2: productData.categoryLevel2,
+        categoryLevel3: productData.categoryLevel3,
+        categoryLevel4: productData.categoryLevel4,
+        category: productData.category
+      });
       console.log('Sending product data to backend:', JSON.stringify(productData, null, 2));
       const response = await apiService.createProduct(productData);
       
@@ -436,12 +496,12 @@ export default function AddProduct() {
 • Name: ${formData.name}
 • Title: ${formData.title}
 • Brand: ${formData.brand}
-• Price: $${formData.price}
 • Status: ${formData.status || 'active'}
 • Category: ${formData.categoryLevel1} > ${formData.categoryLevel2} > ${formData.categoryLevel3}
 • SKU: ${formData.sku || 'Auto-generated'}
 • Colors: ${formData.colorBlocks.length} color(s) added
-• Total Sizes: ${formData.colorBlocks.reduce((total, block) => total + block.sizes.length, 0)} size(s)`;
+• Total Sizes: ${formData.colorBlocks.reduce((total, block) => total + block.sizes.length, 0)} size(s)
+• Pricing: Size-level pricing enabled - each size can have different prices`;
 
       toast.success(successMessage, {
         duration: 5000,
@@ -461,8 +521,7 @@ export default function AddProduct() {
   };
 
   const handleLogout = () => {
-    apiService.logout();
-    router.push('/admin/signin');
+    adminLogout(router);
   };
 
   const addVariant = () => {
@@ -882,16 +941,26 @@ export default function AddProduct() {
     setFormData(prev => ({
       ...prev,
       categoryLevel3: value,
-      categoryLevel4: '',
+      categoryLevel4: '', // Reset to empty string
       category: finalCategoryValue
     }));
   };
 
   const handleCategoryLevel4Change = (value: string) => {
+    // Find the selected sub-category to get its proper value
+    const subCategories = (categoryData[formData.categoryLevel1 as keyof typeof categoryData]?.[formData.categoryLevel2 as keyof typeof categoryData[keyof typeof categoryData]] as any)?.[formData.categoryLevel3];
+    const selectedSubCategory = subCategories?.find((item: any) => item.label === value);
+    
+    console.log('Category Level 4 Change:', {
+      selectedLabel: value,
+      selectedValue: selectedSubCategory?.value,
+      allSubCategories: subCategories
+    });
+    
     setFormData(prev => ({
       ...prev,
-      categoryLevel4: value,
-      category: value
+      categoryLevel4: value, // Store the label (e.g., "Jeans")
+      category: selectedSubCategory ? selectedSubCategory.value : value // Store the value (e.g., "men-clothing-pants-jeans")
     }));
   };
 
@@ -914,6 +983,8 @@ export default function AddProduct() {
       return false;
     }
     
+    // For men's pants, we have multiple real sub-categories (Gabardines, Jeans, Trousers, Pajamas)
+    // So this should return true
     return true;
   };
 
@@ -1082,34 +1153,78 @@ export default function AddProduct() {
                     <Package className="h-4 w-4 text-blue-600" />
                     <h3 className="text-sm font-semibold">Basic Information</h3>
                   </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-start space-x-2">
+                      <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-blue-800">
+                        <p className="font-medium mb-1">New Pricing Structure</p>
+                        <p>Pricing is now handled per color variant. Each color can have its own base price, sale price, and cost price. This allows for more flexible pricing across different product variants.</p>
+                      </div>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="w-full">
                       <Label htmlFor="brand" className="block mb-2 text-sm font-medium">Brand *</Label>
-                      <Select value={formData.brand} onValueChange={(value) => handleInputChange('brand', value)}>
-                        <SelectTrigger className={`h-10 w-full ${formData.errors.brand ? 'border-red-500' : ''}`}>
-                          <SelectValue placeholder="Search and select brand" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <div className="p-2">
-                            <Input
-                              placeholder="Search brands..."
-                              value={brandSearchTerm}
-                              onChange={(e) => handleBrandSearch(e.target.value)}
-                              className="mb-2"
-                            />
-                          </div>
-                          {filteredBrands.map((brand) => (
-                            <SelectItem key={brand} value={brand}>
-                              {brand}
-                            </SelectItem>
-                          ))}
-                          {filteredBrands.length === 0 && (
-                            <div className="px-2 py-1 text-sm text-gray-500">
-                              No brands found
+                      <div className="flex items-center space-x-2">
+                        <Select value={formData.brand} onValueChange={(value) => handleInputChange('brand', value)}>
+                          <SelectTrigger className={`h-10 w-full ${formData.errors.brand ? 'border-red-500' : ''}`}>
+                            <SelectValue placeholder={brandsLoading ? "Loading brands..." : "Search and select brand"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <div className="p-2">
+                              <Input
+                                placeholder="Search brands..."
+                                value={brandSearchTerm}
+                                onChange={(e) => handleBrandSearch(e.target.value)}
+                                className="mb-2"
+                              />
                             </div>
-                          )}
-                        </SelectContent>
-                      </Select>
+                            {brandsLoading ? (
+                              <div className="px-2 py-1 text-sm text-gray-500 flex items-center space-x-2">
+                                <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+                                <span>Loading brands...</span>
+                              </div>
+                            ) : filteredBrands.length > 0 ? (
+                              filteredBrands.map((brand) => (
+                                <SelectItem key={brand} value={brand}>
+                                  {brand}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <div className="px-2 py-1 text-sm text-gray-500">
+                                {allBrands.length === 0 ? (
+                                  <div className="text-center py-2">
+                                    <p className="text-red-500 mb-2">No brands available in database</p>
+                                    <p className="text-xs text-gray-400 mb-2">Please create some brands first</p>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => router.push('/admin/brands')}
+                                      className="w-full text-xs"
+                                    >
+                                      Go to Brands Page
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  "No brands match your search"
+                                )}
+                              </div>
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={loadBrandsFromDatabase}
+                          disabled={brandsLoading}
+                          className="h-10 px-3"
+                          title="Refresh brands from database"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${brandsLoading ? 'animate-spin' : ''}`} />
+                        </Button>
+                      </div>
                       {formData.errors.brand && (
                         <p className="text-red-500 text-sm mt-1">{formData.errors.brand}</p>
                       )}
@@ -1173,50 +1288,7 @@ export default function AddProduct() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="w-full">
-                      <Label htmlFor="price" className="block mb-2 text-sm font-medium">Base Price *</Label>
-                      <Input
-                        id="price"
-                        type="number"
-                        step="0.01"
-                        value={formData.price}
-                        onChange={(e) => handleInputChange('price', e.target.value)}
-                        placeholder="0.00"
-                        className={`h-10 w-full ${formData.errors.price ? 'border-red-500' : ''}`}
-                      />
-                      <p className="text-xs text-gray-500 mt-1">Default price for all variants</p>
-                      {formData.errors.price && (
-                        <p className="text-red-500 text-sm mt-1">{formData.errors.price}</p>
-                      )}
-                    </div>
-                    
-                    <div className="w-full">
-                      <Label htmlFor="salePrice" className="block mb-2 text-sm font-medium">Sale Price</Label>
-                      <Input
-                        id="salePrice"
-                        type="number"
-                        step="0.01"
-                        value={formData.salePrice}
-                        onChange={(e) => handleInputChange('salePrice', e.target.value)}
-                        placeholder="0.00"
-                        className="h-10 w-full"
-                      />
-                    </div>
-                    
-                    <div className="w-full">
-                      <Label htmlFor="costPrice" className="block mb-2 text-sm font-medium">Cost Price</Label>
-                      <Input
-                        id="costPrice"
-                        type="number"
-                        step="0.01"
-                        value={formData.costPrice}
-                        onChange={(e) => handleInputChange('costPrice', e.target.value)}
-                        placeholder="0.00"
-                        className="h-10 w-full"
-                      />
-                    </div>
-                  </div>
+
 
                   <div className={`grid ${hasFourthLevelCategories() ? 'grid-cols-4' : 'grid-cols-3'} gap-4`}>
                     <div className="w-full">
@@ -1292,7 +1364,7 @@ export default function AddProduct() {
                           <SelectContent>
                             {formData.categoryLevel1 && formData.categoryLevel2 && formData.categoryLevel3 && 
                               (categoryData[formData.categoryLevel1 as keyof typeof categoryData]?.[formData.categoryLevel2 as keyof typeof categoryData[keyof typeof categoryData]] as any)?.[formData.categoryLevel3]?.map((item: any, index: number) => (
-                                <SelectItem key={index} value={item.value}>{item.label}</SelectItem>
+                                <SelectItem key={index} value={item.label}>{item.label}</SelectItem>
                               ))
                             }
                           </SelectContent>
@@ -1462,13 +1534,24 @@ export default function AddProduct() {
                           </div>
                         </div>
 
-                        {/* Sizes + Stock */}
+                        {/* Sizes + Stock + Pricing */}
                         <div>
-                          <Label className="block mb-2 text-sm font-medium">Sizes + Stock *</Label>
+                          <Label className="block mb-2 text-sm font-medium">Sizes + Stock + Pricing *</Label>
                           <div className="space-y-3">
+                            {/* Header row for size fields */}
+                            <div className="grid grid-cols-7 gap-2 text-xs font-medium text-gray-600 mb-2">
+                              <div>Size</div>
+                              <div>Quantity</div>
+                              <div>Low Stock</div>
+                              <div>Base Price *</div>
+                              <div>Sale Price</div>
+                              <div>Cost Price</div>
+                              <div>Action</div>
+                            </div>
+                            
                             {colorBlock.sizes.map((size) => (
-                              <div key={size.id} className="flex items-center space-x-3">
-                                <div className="flex-1">
+                              <div key={size.id} className="grid grid-cols-7 gap-2 items-center">
+                                <div>
                                   <Select 
                                     value={size.size} 
                                     onValueChange={(value) => updateSizeInColorBlock(colorBlock.id, size.id, 'size', value)}
@@ -1498,33 +1581,65 @@ export default function AddProduct() {
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                <div className="flex-1">
+                                <div>
                                   <Input
                                     type="number"
                                     value={size.quantity}
                                     onChange={(e) => updateSizeInColorBlock(colorBlock.id, size.id, 'quantity', e.target.value)}
-                                    placeholder="Enter quantity"
+                                    placeholder="Qty"
                                     className="h-10 w-full"
                                   />
                                 </div>
-                                <div className="flex-1">
+                                <div>
                                   <Input
                                     type="number"
-                                    value={formData.lowStockThreshold}
-                                    onChange={(e) => handleInputChange('lowStockThreshold', e.target.value)}
-                                    placeholder="Enter low quantity threshold"
+                                    value={size.lowStockThreshold}
+                                    onChange={(e) => updateSizeInColorBlock(colorBlock.id, size.id, 'lowStockThreshold', e.target.value)}
+                                    placeholder="Threshold"
                                     className="h-10 w-full"
                                   />
                                 </div>
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => removeSizeFromColorBlock(colorBlock.id, size.id)}
-                                  className="bg-red-500 hover:bg-red-600 text-white h-10 w-10 p-0"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
+                                <div>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.basePrice}
+                                    onChange={(e) => updateSizeInColorBlock(colorBlock.id, size.id, 'basePrice', e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-10 w-full"
+                                  />
+                                </div>
+                                <div>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.salePrice}
+                                    onChange={(e) => updateSizeInColorBlock(colorBlock.id, size.id, 'salePrice', e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-10 w-full"
+                                  />
+                                </div>
+                                <div>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={size.costPrice}
+                                    onChange={(e) => updateSizeInColorBlock(colorBlock.id, size.id, 'costPrice', e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-10 w-full"
+                                  />
+                                </div>
+                                <div>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => removeSizeFromColorBlock(colorBlock.id, size.id)}
+                                    className="bg-red-500 hover:bg-red-600 text-white h-10 w-10 p-0"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                             ))}
                             <Button
@@ -1699,7 +1814,6 @@ export default function AddProduct() {
                     </div>
                   )}
                 </div>
-
               </CardContent>
             </Card>
 

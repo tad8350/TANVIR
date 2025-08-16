@@ -23,6 +23,9 @@ export class ProductVariant {
   @Column()
   stock: number;
 
+  @Column({ name: 'low_stock_threshold', type: 'int', nullable: true })
+  lowStockThreshold: number;
+
   @Column({ type: 'numeric' })
   price: number;
 

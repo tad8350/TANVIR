@@ -17,11 +17,12 @@ import {
   Search, Edit, Trash2, Eye, MoreHorizontal, Filter,
   Calendar, Building, Globe, Phone, Mail as MailIcon,
   Star, TrendingDown, Users as UsersIcon, ShoppingCart,
-  Image, Palette, Ruler, Hash, RefreshCw
+  RefreshCw, Image, Hash, Palette, Info
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import { apiService } from "@/lib/api";
+import { useState, useEffect, useCallback } from "react";
+import { apiService, ProductFormData } from "@/lib/api";
 import { toast } from "sonner";
+import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
 
 interface Product {
   id: number;
@@ -35,7 +36,13 @@ interface Product {
   category_level1?: string;
   category_level2?: string;
   category_level3?: string;
-  brand: string;
+  category_level4?: string;
+  // Also support camelCase for compatibility with add product form
+  categoryLevel1?: string;
+  categoryLevel2?: string;
+  categoryLevel3?: string;
+  categoryLevel4?: string;
+  brand: string | { id: number; brand_name: string; business_name?: string };
   status: 'active' | 'inactive' | 'draft' | 'out_of_stock';
   created_at: string;
   updated_at?: string;
@@ -52,6 +59,21 @@ interface Product {
       size: string;
       quantity: string;
     }>;
+  }>;
+  variants?: Array<{
+    id: number;
+    product_id: number;
+    color_id: number;
+    size_id: number;
+    stock: number;
+    lowStockThreshold: number;
+    price: string;
+    discount_price: string;
+    cost_price?: string;
+    sku: string;
+    is_active: boolean;
+    color?: { name: string };
+    size?: { name: string };
   }>;
   tags?: string[];
   rating?: number;
@@ -108,15 +130,70 @@ export default function ProductsPage() {
     totalRevenue: 0
   });
 
+  // Modal states
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  
+  // Variant management states
+  const [showAddVariant, setShowAddVariant] = useState(false);
+  const [newVariant, setNewVariant] = useState({
+    color: '',
+    size: '',
+    stock: 0,
+    lowStockThreshold: 10,
+    basePrice: '',
+    salePrice: '',
+    costPrice: ''
+  });
+  const [availableColors] = useState([
+    'Red', 'Blue', 'Green', 'Black', 'White', 'Gray', 'Navy', 'Brown', 
+    'Pink', 'Purple', 'Yellow', 'Orange', 'Beige', 'Maroon', 'Teal', 
+    'Cyan', 'Magenta', 'Lime', 'Olive', 'Silver', 'Gold', 'Indigo'
+  ]);
+  const [availableSizes] = useState([
+    'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'
+  ]);
+
   useEffect(() => {
     loadProducts();
   }, [currentPage, searchTerm, statusFilter, categoryFilter, categoryLevel2Filter, categoryLevel3Filter, brandFilter, priceFilter]);
 
+  // Check authentication on component mount
+  useEffect(() => {
+    requireAdminAuth(router);
+    
+    // Cleanup sessionStorage when component unmounts
+    return () => {
+      sessionStorage.removeItem('products_page_navigated_away');
+    };
+  }, [router]);
+
   // Add focus event listener to refresh products when returning to the page
   useEffect(() => {
+    let lastUrl = window.location.href;
+    
     const handleFocus = () => {
-      // Refresh products when the page gains focus (user returns from add/edit page)
-        loadProducts();
+      const currentUrl = window.location.href;
+      
+      // Only reload if we're actually on the same products page (not switching between apps)
+      if (currentUrl === lastUrl && currentUrl.includes('/admin/products')) {
+        // Check if we're returning from add/edit page by looking at navigation history
+        const hasNavigatedAway = sessionStorage.getItem('products_page_navigated_away');
+        
+        if (hasNavigatedAway === 'true') {
+          console.log('Returning from add/edit page, refreshing products...');
+          // Use a timeout to avoid calling loadProducts before it's defined
+          setTimeout(() => {
+            if (typeof loadProducts === 'function') {
+              loadProducts();
+            }
+          }, 100);
+          sessionStorage.removeItem('products_page_navigated_away');
+        }
+      }
+      
+      lastUrl = currentUrl;
     };
 
     window.addEventListener('focus', handleFocus);
@@ -130,7 +207,7 @@ export default function ProductsPage() {
     }
   }, [loading, products.length]);
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -140,7 +217,7 @@ export default function ProductsPage() {
       if (categoryFilter !== 'all') filters.category_level1 = categoryFilter;
       if (categoryLevel2Filter !== 'all') filters.category_level2 = categoryLevel2Filter;
       if (categoryLevel3Filter !== 'all') filters.category_level3 = categoryLevel3Filter;
-      if (brandFilter !== 'all') filters.brand = brandFilter;
+      if (brandFilter !== 'all') filters.brand_id = brandFilter;
       if (searchTerm) filters.search = searchTerm;
       if (priceFilter !== 'all') {
         const [min, max] = priceFilter.split('-').map(p => p === '+' ? '1000' : p);
@@ -196,8 +273,8 @@ export default function ProductsPage() {
             if (typeof item.name !== 'string') return false;
             if (typeof item.id !== 'number') return false;
             
-            // Skip if this looks like brand data instead of product data
-            if (item.brand_name || item.business_name || item.tax_id) {
+            // Skip if this looks like brand data instead of product data (but allow products with brand objects)
+            if ((item.brand_name || item.business_name || item.tax_id) && !item.name) {
               console.warn('Skipping brand data found in products response:', item);
               return false;
             }
@@ -220,11 +297,63 @@ export default function ProductsPage() {
               price: Number(item.price) || 0,
               sale_price: item.sale_price ? Number(item.sale_price) : undefined,
               cost_price: item.cost_price ? Number(item.cost_price) : undefined,
-              category: String(item.category || 'unknown'),
-              category_level1: String(item.category_level1 || ''),
-              category_level2: String(item.category_level2 || ''),
-              category_level3: String(item.category_level3 || ''),
-              brand: String(item.brand || 'Unknown Brand'),
+              category: (() => {
+                // Build clean category path from individual levels
+                const categoryPath = [];
+                
+                // Add each level if it exists and is not empty
+                if (item.categoryLevel1 || item.category_level1) {
+                  const level1 = (item.categoryLevel1 || item.category_level1).toLowerCase();
+                  categoryPath.push(level1);
+                }
+                
+                if (item.categoryLevel2 || item.category_level2) {
+                  const level2 = (item.categoryLevel2 || item.category_level2).toLowerCase();
+                  categoryPath.push(level2);
+                }
+                
+                if (item.categoryLevel3 || item.category_level3) {
+                  const level3 = (item.categoryLevel3 || item.category_level3).toLowerCase();
+                  categoryPath.push(level3);
+                }
+                
+                // Add level4 - extract the actual category name from concatenated strings
+                if (item.categoryLevel4 || item.category_level4) {
+                  const level4 = (item.categoryLevel4 || item.category_level4);
+                  
+                  // If it's a concatenated string like "men-clothing-shirts-casual", extract the last part
+                  if (level4.includes('-')) {
+                    const parts = level4.split('-');
+                    const lastPart = parts[parts.length - 1]; // Get "casual" from "men-clothing-shirts-casual"
+                    if (lastPart && lastPart.length > 0) {
+                      categoryPath.push(lastPart.toLowerCase());
+                    }
+                  } else if (level4.includes('_')) {
+                    // Handle underscore-separated strings
+                    const parts = level4.split('_');
+                    const lastPart = parts[parts.length - 1];
+                    if (lastPart && lastPart.length > 0) {
+                      categoryPath.push(lastPart.toLowerCase());
+                    }
+                  } else {
+                    // If it's a clean string, use it directly
+                    categoryPath.push(level4.toLowerCase());
+                  }
+                }
+                
+                // Return the clean path or fallback
+                return categoryPath.length > 0 ? categoryPath.join(' → ') : (item.category || 'unknown');
+              })(),
+              category_level1: String(item.category_level1 || item.categoryLevel1 || ''),
+              category_level2: String(item.category_level2 || item.categoryLevel2 || ''),
+              category_level3: String(item.category_level3 || item.categoryLevel3 || ''),
+              category_level4: String(item.categoryLevel4 || item.category_level4 || ''),
+              // Also support camelCase for compatibility
+              categoryLevel1: String(item.categoryLevel1 || item.category_level1 || ''),
+              categoryLevel2: String(item.categoryLevel2 || item.category_level2 || ''),
+              categoryLevel3: String(item.categoryLevel3 || item.category_level3 || ''),
+              categoryLevel4: String(item.categoryLevel4 || item.category_level4 || ''),
+              brand: item.brand || 'Unknown Brand',
               status: validStatus,
               created_at: String(item.created_at || new Date().toISOString()),
               updated_at: item.updated_at ? String(item.updated_at) : undefined,
@@ -233,6 +362,7 @@ export default function ProductsPage() {
               barcode: item.barcode ? String(item.barcode) : undefined,
               images: Array.isArray(item.images) ? item.images : [],
               color_blocks: Array.isArray(item.color_blocks) ? item.color_blocks : [],
+              variants: Array.isArray(item.variants) ? item.variants : [],
               tags: Array.isArray(item.tags) ? item.tags : [],
               rating: item.rating ? Number(item.rating) : 0,
               review_count: item.review_count ? Number(item.review_count) : 0,
@@ -255,6 +385,25 @@ export default function ProductsPage() {
         
         console.log('Valid products after cleaning:', validProducts.length);
         console.log('Sample product:', validProducts[0]);
+        console.log('Sample product variants:', validProducts[0]?.variants);
+        console.log('Sample product stock_quantity:', validProducts[0]?.stock_quantity);
+        console.log('Sample product category data:', {
+          category: validProducts[0]?.category,
+          category_level1: validProducts[0]?.category_level1,
+          category_level2: validProducts[0]?.category_level2,
+          category_level3: validProducts[0]?.category_level3,
+          categoryLevel1: validProducts[0]?.categoryLevel1,
+          categoryLevel2: validProducts[0]?.categoryLevel2,
+          categoryLevel3: validProducts[0]?.categoryLevel3,
+          categoryLevel4: validProducts[0]?.categoryLevel4
+        });
+        
+        // Also log the raw API response for the first product
+        if (productsList.length > 0) {
+          console.log('Raw API response for first product:', productsList[0]);
+          console.log('Raw API response - all keys:', Object.keys(productsList[0]));
+          console.log('Raw API response - category related keys:', Object.keys(productsList[0]).filter(key => key.toLowerCase().includes('category')));
+        }
         
         // Check if we got any valid products
         if (validProducts.length === 0 && productsList.length > 0) {
@@ -335,18 +484,72 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, searchTerm, statusFilter, categoryFilter, categoryLevel2Filter, categoryLevel3Filter, brandFilter, priceFilter]);
 
   const handleAddProduct = () => {
+    // Mark that we're navigating away from products page
+    sessionStorage.setItem('products_page_navigated_away', 'true');
     router.push('/admin/products/add');
   };
 
   const handleEditProduct = (productId: number) => {
-    router.push(`/admin/products/edit/${productId}`);
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      // Clean up variant SKUs before opening edit modal
+      const cleanedProduct = { ...product };
+      if (cleanedProduct.variants && Array.isArray(cleanedProduct.variants)) {
+        const baseSku = getProductSKU(cleanedProduct);
+        cleanedProduct.variants = cleanedProduct.variants.map(variant => ({
+          ...variant,
+          sku: `${baseSku}-${variant.color?.name?.toUpperCase() || 'UNKNOWN'}-${variant.size?.name?.toUpperCase() || 'UNKNOWN'}`
+        }));
+      }
+      
+      // Debug: Log category data to see what's available
+      console.log('Product category data for edit:', {
+        category_level1: cleanedProduct.category_level1,
+        category_level2: cleanedProduct.category_level2,
+        category_level3: cleanedProduct.category_level3,
+        category_level4: cleanedProduct.category_level4,
+        categoryLevel1: cleanedProduct.categoryLevel1,
+        categoryLevel2: cleanedProduct.categoryLevel2,
+        categoryLevel3: cleanedProduct.categoryLevel3,
+        categoryLevel4: cleanedProduct.categoryLevel4,
+        // Also check the raw product data
+        rawProduct: {
+          categoryLevel1: product.categoryLevel1,
+          categoryLevel2: product.categoryLevel2,
+          categoryLevel3: product.categoryLevel3,
+          categoryLevel4: product.categoryLevel4,
+          category_level1: product.category_level1,
+          category_level2: product.category_level2,
+          category_level3: product.category_level3,
+          category_level4: product.category_level4
+        }
+      });
+      
+      setSelectedProduct(cleanedProduct);
+      setEditModalOpen(true);
+      // Reset variant management state
+      setShowAddVariant(false);
+      setNewVariant({
+        color: '',
+        size: '',
+        stock: 0,
+        lowStockThreshold: 10,
+        basePrice: '',
+        salePrice: '',
+        costPrice: ''
+      });
+    }
   };
 
   const handleViewProduct = (productId: number) => {
-    router.push(`/admin/products/view/${productId}`);
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      setSelectedProduct(product);
+      setViewModalOpen(true);
+    }
   };
 
   const handleDeleteProduct = async (productId: number) => {
@@ -362,6 +565,269 @@ export default function ProductsPage() {
     }
   };
 
+  const handleSaveProduct = async () => {
+    if (!selectedProduct) return;
+    
+    try {
+
+      // Collect all form values from the controlled inputs
+      // Use field names that match the ProductFormData interface
+      const formData: Partial<ProductFormData> = {
+        name: selectedProduct.name,
+        title: selectedProduct.title || '',
+        description: selectedProduct.description || '',
+        sku: getProductSKU(selectedProduct),
+        barcode: selectedProduct.barcode || '',
+        brand: getBrandName(selectedProduct.brand), // Convert brand object to string
+        status: selectedProduct.status,
+        categoryLevel1: selectedProduct.category_level1 || selectedProduct.categoryLevel1 || '',
+        categoryLevel2: selectedProduct.category_level2 || selectedProduct.categoryLevel2 || '',
+        categoryLevel3: selectedProduct.category_level3 || selectedProduct.categoryLevel3 || '',
+        categoryLevel4: selectedProduct.category_level4 || selectedProduct.categoryLevel4 || '',
+        category: selectedProduct.category_level3 || selectedProduct.categoryLevel3 || '', // Use level3 as main category
+        shippingWeight: selectedProduct.shipping_weight || '',
+        shippingClass: selectedProduct.shipping_class || '',
+        taxClass: selectedProduct.tax_class || '',
+        taxRate: selectedProduct.tax_rate || '',
+        metaTitle: selectedProduct.meta_title || '',
+        metaDescription: selectedProduct.meta_description || '',
+        keywords: selectedProduct.keywords || '',
+        // Include ALL variants including new ones (don't filter out temporary ones)
+        variants: selectedProduct.variants || [],
+        // Additional fields that might be useful
+        hasVariants: (selectedProduct.variants && selectedProduct.variants.length > 0) || false,
+        variantType: 'color-size', // Default variant type for fashion products
+        tags: selectedProduct.tags || [],
+        images: selectedProduct.images || []
+      };
+
+      // Convert variants to colorBlocks format that the backend expects
+      if (formData.variants && Array.isArray(formData.variants)) {
+        // Group variants by color to create colorBlocks
+        const colorGroups = new Map();
+        
+        formData.variants.forEach(variant => {
+          const colorName = variant.color?.name || 'Unknown';
+          const sizeName = variant.size?.name || 'Unknown';
+          
+          if (!colorGroups.has(colorName)) {
+            colorGroups.set(colorName, {
+              color: colorName,
+              newColor: colorName,
+              sizes: []
+            });
+          }
+          
+          const colorBlock = colorGroups.get(colorName);
+          colorBlock.sizes.push({
+            size: sizeName,
+            quantity: variant.stock?.toString() || '0',
+            lowStockThreshold: variant.lowStockThreshold?.toString() || '10',
+            basePrice: variant.price?.toString() || '0',
+            salePrice: variant.discount_price?.toString() || '0',
+            costPrice: variant.cost_price?.toString() || '0'
+          });
+        });
+        
+        // Convert to array format
+        const colorBlocks = Array.from(colorGroups.values());
+        
+        // Replace variants with colorBlocks
+        delete formData.variants;
+        formData.colorBlocks = colorBlocks;
+        
+        console.log('Converted variants to colorBlocks:', colorBlocks);
+      }
+
+      // Filter out empty values and ensure proper data types
+      const filteredFormData = Object.fromEntries(
+        Object.entries(formData).filter(([key, value]) => {
+          // Skip undefined, null, and empty strings
+          if (value === '' || value === null || value === undefined) return false;
+          if (typeof value === 'string' && value.trim() === '') return false;
+          
+          // Skip variants if empty array
+          if (key === 'variants' && Array.isArray(value) && value.length === 0) return false;
+          
+          return true;
+        })
+      );
+
+      console.log('Form data to update:', filteredFormData);
+      console.log('All variants (including temporary):', selectedProduct.variants);
+      console.log('Converted colorBlocks for backend:', formData.colorBlocks);
+
+      // Call API to update product
+      await apiService.updateProduct(selectedProduct.id, filteredFormData);
+      
+      toast.success('Product updated successfully!');
+      
+      // Refresh the products list
+      await loadProducts();
+      
+      // Close the modal
+      setEditModalOpen(false);
+      setSelectedProduct(null);
+      
+    } catch (error) {
+      console.error('Error updating product:', error);
+      toast.error('Failed to update product. Please try again.');
+    }
+  };
+
+  // Variant management functions
+  const handleAddNewVariant = () => {
+    setShowAddVariant(true);
+    setNewVariant({
+      color: '',
+      size: '',
+      stock: 0,
+      lowStockThreshold: 10,
+      basePrice: '',
+      salePrice: '',
+      costPrice: ''
+    });
+  };
+
+  const handleSaveNewVariant = async () => {
+    if (!selectedProduct || !newVariant.color || !newVariant.size) {
+      toast.error('Please fill in all required fields for the new variant.');
+      return;
+    }
+
+    try {
+      // Check if variant already exists
+      const existingVariant = selectedProduct.variants?.find(
+        v => v.color?.name === newVariant.color && v.size?.name === newVariant.size
+      );
+
+      if (existingVariant) {
+        toast.error('This color/size combination already exists for this product.');
+        return;
+      }
+
+      // Generate new variant SKU
+      // Use the product's base SKU and append color and size
+      const baseSku = selectedProduct.sku || 'PROD';
+      
+      // Clean the base SKU to remove any existing variant suffixes
+      const cleanBaseSku = baseSku.split('-').slice(0, 1).join('-');
+      
+      const newVariantSku = `${cleanBaseSku}-${newVariant.color.toUpperCase()}-${newVariant.size.toUpperCase()}`;
+      
+      console.log('SKU Generation:', {
+        baseSku: cleanBaseSku,
+        color: newVariant.color.toUpperCase(),
+        size: newVariant.size.toUpperCase(),
+        finalSku: newVariantSku
+      });
+
+      // Create new variant object for immediate UI display
+      const newVariantObject = {
+        id: -(Date.now()), // Use negative timestamp as temporary ID to avoid conflicts
+        product_id: selectedProduct.id,
+        color_id: 0, // Temporary color_id
+        size_id: 0, // Temporary size_id
+        stock: newVariant.stock,
+        lowStockThreshold: newVariant.lowStockThreshold,
+        price: newVariant.basePrice || '0',
+        discount_price: newVariant.salePrice || '0',
+        cost_price: newVariant.costPrice || '0',
+        sku: newVariantSku,
+        is_active: true,
+        color: { name: newVariant.color },
+        size: { name: newVariant.size }
+      };
+
+      // Add new variant to the product's variants array immediately
+      const updatedVariants = [
+        ...(selectedProduct.variants || []),
+        newVariantObject
+      ];
+
+      // Update the selected product state to show the new variant immediately
+      setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } as Product : null);
+      
+      toast.success('New variant added successfully! You can now see it in the list below.');
+      
+      // Reset form and hide add variant section
+      setShowAddVariant(false);
+      setNewVariant({
+        color: '',
+        size: '',
+        stock: 0,
+        lowStockThreshold: 10,
+        basePrice: '',
+        salePrice: '',
+        costPrice: ''
+      });
+      
+      // Note: Variant is now visible in the UI and will be saved when you click "Save Changes"
+      
+    } catch (error) {
+      console.error('Error adding new variant:', error);
+      toast.error('Failed to add new variant. Please try again.');
+    }
+  };
+
+  const handleCancelAddVariant = () => {
+    setShowAddVariant(false);
+    setNewVariant({
+      color: '',
+      size: '',
+      stock: 0,
+      lowStockThreshold: 10,
+      basePrice: '',
+      salePrice: '',
+      costPrice: ''
+    });
+  };
+
+  const handleVariantUpdate = async (variantId: number, field: string, value: any) => {
+    if (!selectedProduct) return;
+
+    try {
+      // Update variant in local state first for immediate UI feedback
+      const updatedVariants = selectedProduct.variants?.map(variant => 
+        variant.id === variantId ? { ...variant, [field]: value } : variant
+      );
+
+      setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } : null);
+
+      // Variant updated in UI - will be saved when you click "Save Changes"
+      toast.success('Variant updated successfully!');
+      
+    } catch (error) {
+      console.error('Error updating variant:', error);
+      toast.error('Failed to update variant. Please try again.');
+      
+      // Revert local state on error
+      await loadProducts();
+    }
+  };
+
+  const handleVariantDelete = async (variantId: number) => {
+    if (!selectedProduct || !confirm('Are you sure you want to delete this variant?')) return;
+
+    try {
+      // Remove variant from local state for immediate UI feedback
+      const updatedVariants = selectedProduct.variants?.filter(variant => variant.id !== variantId);
+      setSelectedProduct(prev => prev ? { ...prev, variants: updatedVariants } : null);
+
+      // Variant removed from UI - will be saved when you click "Save Changes"
+      toast.success('Variant removed successfully!');
+      
+    } catch (error) {
+      console.error('Error deleting variant:', error);
+      toast.error('Failed to delete variant. Please try again.');
+      
+      // Revert local state on error
+      await loadProducts();
+    }
+  };
+
+
+
   const handleCategoryFilterChange = (value: string) => {
     setCategoryFilter(value);
     setCategoryLevel2Filter('all');
@@ -374,8 +840,7 @@ export default function ProductsPage() {
   };
 
   const handleLogout = () => {
-    apiService.logout();
-    router.push('/admin/signin');
+    adminLogout(router);
   };
 
   const getStatusColor = (status: string) => {
@@ -399,63 +864,176 @@ export default function ProductsPage() {
   };
 
   const getCategoryColor = (category: string) => {
-    switch (category) {
+    // Handle full category paths by checking the first level
+    const firstLevel = category.split(' → ')[0]?.toLowerCase();
+    
+    switch (firstLevel) {
+      case 'men': return 'bg-blue-100 text-blue-800';
+      case 'women': return 'bg-pink-100 text-pink-800';
       case 'clothing': return 'bg-blue-100 text-blue-800';
       case 'electronics': return 'bg-green-100 text-green-800';
       case 'home': return 'bg-yellow-100 text-yellow-800';
       case 'sports': return 'bg-purple-100 text-purple-800';
       case 'beauty': return 'bg-pink-100 text-pink-800';
+      case 'accessories': return 'bg-indigo-100 text-indigo-800';
+      case 'shoes': return 'bg-orange-100 text-orange-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  // Calculate total stock quantity from color blocks
+  // Calculate total stock quantity from variants or color blocks
   const getTotalStock = (product: Product) => {
     if (!product) return 0;
     
-    if (product.stock_quantity !== undefined) {
+    // Always check variants first - this is the source of truth for stock
+    if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+      const totalStock = product.variants.reduce((total, variant) => {
+        return total + (variant.stock || 0);
+      }, 0);
+      console.log(`Product ${product.name} - Variants stock:`, product.variants.map(v => ({ id: v.id, stock: v.stock })), 'Total:', totalStock);
+      return totalStock;
+    }
+    
+    // Fallback to product-level stock_quantity
+    if (product.stock_quantity !== undefined && product.stock_quantity > 0) {
+      console.log(`Product ${product.name} - Product-level stock:`, product.stock_quantity);
       return product.stock_quantity;
     }
     
+    // Fallback to old color_blocks structure
     if (product.color_blocks && Array.isArray(product.color_blocks)) {
-      return product.color_blocks.reduce((total, block) => {
+      const totalStock = product.color_blocks.reduce((total, block) => {
         if (!block || !Array.isArray(block.sizes)) return total;
         return total + block.sizes.reduce((blockTotal, size) => {
           return blockTotal + parseInt(size.quantity || '0');
         }, 0);
       }, 0);
+      console.log(`Product ${product.name} - Color blocks stock:`, totalStock);
+      return totalStock;
+    }
+    
+    console.log(`Product ${product.name} - No stock data found`);
+    return 0;
+  };
+
+  // Get colors from variants or color blocks
+  const getProductColors = (product: Product) => {
+    if (!product) return [];
+    
+    // Check for new variants structure first
+    if (product.variants && Array.isArray(product.variants)) {
+      const colors = new Set<string>();
+      product.variants.forEach(variant => {
+        if (variant.color && variant.color.name) {
+          colors.add(variant.color.name);
+        }
+      });
+      return Array.from(colors);
+    }
+    
+    // Fallback to old color_blocks structure
+    if (product.color_blocks && Array.isArray(product.color_blocks)) {
+      return product.color_blocks
+        .filter(block => block && (block.color || block.new_color))
+        .map(block => block.color || block.new_color)
+        .filter(Boolean);
+    }
+    
+    return [];
+  };
+
+  // Get sizes from variants or color blocks
+  const getProductSizes = (product: Product) => {
+    if (!product) return [];
+    
+    // Check for new variants structure first
+    if (product.variants && Array.isArray(product.variants)) {
+      const sizes = new Set<string>();
+      product.variants.forEach(variant => {
+        if (variant.size && variant.size.name) {
+          sizes.add(variant.size.name);
+        }
+      });
+      return Array.from(sizes);
+    }
+    
+    // Fallback to old color_blocks structure
+    if (product.color_blocks && Array.isArray(product.color_blocks)) {
+      const sizes = new Set<string>();
+      product.color_blocks.forEach(block => {
+        if (block && Array.isArray(block.sizes)) {
+          block.sizes.forEach(size => {
+            if (size && size.size) sizes.add(size.size);
+          });
+        }
+      });
+      return Array.from(sizes);
+    }
+    
+    return [];
+  };
+
+  // Get brand name from brand object or string
+  const getBrandName = (brand: string | { id: number; brand_name: string; business_name?: string } | undefined) => {
+    if (!brand) return 'Unknown';
+    if (typeof brand === 'string') return brand;
+    if (typeof brand === 'object' && brand.brand_name) return brand.brand_name;
+    return 'Unknown';
+  };
+
+  // Get price from variants or fallback to product price
+  const getProductPrice = (product: Product) => {
+    if (product.price && product.price > 0) return product.price;
+    
+    if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+      // Get the first variant with a price
+      const variantWithPrice = product.variants.find(variant => variant.price && parseFloat(variant.price) > 0);
+      if (variantWithPrice) {
+        return parseFloat(variantWithPrice.price);
+      }
     }
     
     return 0;
   };
 
-  // Get colors from color blocks
-  const getProductColors = (product: Product) => {
-    if (!product || !product.color_blocks || !Array.isArray(product.color_blocks)) {
-      return [];
+  // Helper function to extract category level 3 from category string
+  const extractCategoryLevel3 = (categoryString: string | undefined): string => {
+    if (!categoryString) return '';
+    
+    // Handle category strings like "men-clothing-shirts-casual" or "men → clothing → shirts → casual"
+    if (categoryString.includes('-')) {
+      const parts = categoryString.split('-');
+      if (parts.length >= 3) {
+        return parts[2]; // Return "shirts" from "men-clothing-shirts-casual"
+      }
+    } else if (categoryString.includes('→')) {
+      const parts = categoryString.split('→').map(part => part.trim());
+      if (parts.length >= 3) {
+        return parts[2]; // Return "shirts" from "men → clothing → shirts → casual"
+      }
     }
     
-    return product.color_blocks
-      .filter(block => block && (block.color || block.new_color))
-      .map(block => block.color || block.new_color)
-      .filter(Boolean);
+    return '';
   };
 
-  // Get sizes from color blocks
-  const getProductSizes = (product: Product) => {
-    if (!product || !product.color_blocks || !Array.isArray(product.color_blocks)) {
-      return [];
+  // Get clean base SKU from product or extract from first variant
+  const getProductSKU = (product: Product) => {
+    if (product.sku && product.sku !== 'No SKU') {
+      // Clean the SKU to remove any variant suffixes
+      const cleanSku = product.sku.split('-').slice(0, 1).join('-');
+      return cleanSku;
     }
     
-    const sizes = new Set<string>();
-    product.color_blocks.forEach(block => {
-      if (block && Array.isArray(block.sizes)) {
-        block.sizes.forEach(size => {
-          if (size && size.size) sizes.add(size.size);
-        });
+    if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+      // Get the first variant with a SKU and extract base
+      const variantWithSKU = product.variants.find(variant => variant.sku && variant.sku.trim() !== '');
+      if (variantWithSKU) {
+        const cleanSku = variantWithSKU.sku.split('-').slice(0, 1).join('-');
+        return cleanSku;
       }
-    });
-    return Array.from(sizes);
+    }
+    
+    return 'No SKU';
   };
 
   return (
@@ -465,50 +1043,83 @@ export default function ProductsPage() {
         <div className="p-4">
           <h2 className="text-4xl font-bold text-gray-900 mb-6 text-center">TAD</h2>
           <nav className="space-y-1">
-            <a href="/admin/dashboard" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            <button 
+              onClick={() => router.push('/admin/dashboard')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Home className="h-4 w-4" />
               <span>Dashboard</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/users')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Users className="h-4 w-4" />
               <span>Users</span>
-            </a>
-            <a href="/admin/brands" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/brands')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Tag className="h-4 w-4" />
               <span>Brands</span>
-            </a>
-            <a href="/admin/products" className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600 text-white shadow-md text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/products')}
+              className="flex items-center space-x-3 py-2 rounded-lg bg-blue-600 text-white shadow-md text-sm w-full text-left px-3"
+            >
               <Box className="h-4 w-4" />
               <span className="font-medium">Products</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/orders')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Clipboard className="h-4 w-4" />
               <span>Orders</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/payments')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <CreditCard className="h-4 w-4" />
               <span>Payments</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/logistics')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Truck className="h-4 w-4" />
               <span>Logistics</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/analytics')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <BarChart3 className="h-4 w-4" />
               <span>Analytics</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/marketing')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Megaphone className="h-4 w-4" />
               <span>Marketing & Promotions</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/settings')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Settings className="h-4 w-4" />
               <span>Settings</span>
-            </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            </button>
+            <button 
+              onClick={() => router.push('/admin/support')}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm w-full text-left"
+            >
               <Mail className="h-4 w-4" />
               <span>Support inbox</span>
-            </a>
+            </button>
           </nav>
         </div>
       </div>
@@ -932,12 +1543,12 @@ export default function ProductsPage() {
                   <CardContent className="space-y-3">
                     {/* Category and Brand */}
                     <div className="flex items-center justify-between">
-                      <Badge variant="outline" className={`${getCategoryColor(product.category || '')} text-xs`}>
-                        {(product.category || 'Unknown').charAt(0).toUpperCase() + (product.category || 'Unknown').slice(1)}
-                      </Badge>
+                                             <Badge variant="outline" className={`${getCategoryColor(product.category || '')} text-xs max-w-full truncate`}>
+                         {product.category || 'Unknown'}
+                       </Badge>
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Brand</p>
-                        <p className="text-sm font-semibold text-gray-900 truncate">{product.brand || 'Unknown'}</p>
+                        <p className="text-sm font-semibold text-gray-900 truncate">{getBrandName(product.brand)}</p>
                       </div>
                     </div>
 
@@ -946,7 +1557,7 @@ export default function ProductsPage() {
                       <div>
                         <p className="text-xs text-gray-500">Price</p>
                         <div className="flex items-center space-x-1">
-                          <p className="text-sm font-semibold text-green-600">${product.price}</p>
+                          <p className="text-sm font-semibold text-green-600">${getProductPrice(product)}</p>
                           {product.sale_price && (
                             <p className="text-xs text-gray-400 line-through">${product.sale_price}</p>
                           )}
@@ -980,7 +1591,7 @@ export default function ProductsPage() {
                     <div className="space-y-1">
                       <div className="flex items-center space-x-1 text-xs">
                         <Hash className="h-3 w-3 text-gray-400" />
-                        <span className="text-gray-600">{product.sku || 'No SKU'}</span>
+                        <span className="text-gray-600">{getProductSKU(product)}</span>
                       </div>
                       {getProductColors(product).length > 0 && (
                         <div className="flex items-center space-x-1 text-xs">
@@ -1056,6 +1667,902 @@ export default function ProductsPage() {
           )}
         </div>
       </div>
+
+      {/* View Product Modal */}
+      {viewModalOpen && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Product Details: {selectedProduct.name}</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Basic Information */}
+              <div className="border-b pb-4">
+                <h3 className="text-lg font-semibold mb-3">Basic Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Product Name</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.name}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Title</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.title || 'No title'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Status</Label>
+                    <Badge className={getStatusColor(selectedProduct.status)}>
+                      {selectedProduct.status}
+                    </Badge>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Brand</Label>
+                    <p className="text-sm text-gray-900">{getBrandName(selectedProduct.brand)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Category</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.category || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">SKU</Label>
+                    <p className="text-sm text-gray-900">{getProductSKU(selectedProduct)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pricing Information */}
+              <div className="border-b pb-4">
+                <h3 className="text-lg font-semibold mb-3">Pricing Information</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Base Price</Label>
+                    <p className="text-sm text-gray-900">${getProductPrice(selectedProduct)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Sale Price</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.sale_price ? `$${selectedProduct.sale_price}` : 'No sale price'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Cost Price</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.cost_price ? `$${selectedProduct.cost_price}` : 'Not specified'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Inventory Information */}
+              <div className="border-b pb-4">
+                <h3 className="text-lg font-semibold mb-3">Inventory Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Total Stock</Label>
+                    <p className="text-sm text-gray-900">{getTotalStock(selectedProduct)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Track Inventory</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.track_inventory ? 'Yes' : 'No'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Allow Backorders</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.allow_backorders ? 'Yes' : 'No'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Min Order Quantity</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.min_order_quantity || 'Not specified'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Variants Information */}
+              {selectedProduct.variants && selectedProduct.variants.length > 0 && (
+                <div className="border-b pb-4">
+                  <h3 className="text-lg font-semibold mb-3">Product Variants</h3>
+                  <div className="space-y-3">
+                    {selectedProduct.variants.map((variant, index) => (
+                      <div key={variant.id} className="border rounded-lg p-3 bg-gray-50">
+                        <div className="grid grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Color</Label>
+                            <p className="text-gray-900">{variant.color?.name || 'Unknown'}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Size</Label>
+                            <p className="text-gray-900">{variant.size?.name || 'Unknown'}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Stock</Label>
+                            <p className="text-gray-900">{variant.stock}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Price</Label>
+                            <p className="text-gray-900">${variant.price || '0'}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 mt-2 text-sm">
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Low Stock Threshold</Label>
+                            <p className="text-gray-900">{variant.lowStockThreshold || 'Not set'}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">SKU</Label>
+                            <p className="text-gray-900">{variant.sku}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium text-gray-700">Status</Label>
+                            <Badge className={variant.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                              {variant.is_active ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Description */}
+              {selectedProduct.description && (
+                <div className="border-b pb-4">
+                  <h3 className="text-lg font-semibold mb-3">Description</h3>
+                  <p className="text-sm text-gray-900">{selectedProduct.description}</p>
+                </div>
+              )}
+
+              {/* Additional Details */}
+              <div className="border-b pb-4">
+                <h3 className="text-lg font-semibold mb-3">Additional Details</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Barcode</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.barcode || 'Not provided'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Shipping Weight</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.shipping_weight || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Shipping Class</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.shipping_class || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Tax Class</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.tax_class || 'Not specified'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Meta Information */}
+              <div className="border-b pb-4">
+                <h3 className="text-lg font-semibold mb-3">SEO & Meta Information</h3>
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Meta Title</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.meta_title || 'Not provided'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Meta Description</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.meta_description || 'Not provided'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Keywords</Label>
+                    <p className="text-sm text-gray-900">{selectedProduct.keywords || 'Not provided'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Timestamps */}
+              <div>
+                <h3 className="text-lg font-semibold mb-3">Timestamps</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Created At</Label>
+                    <p className="text-sm text-gray-900">
+                      {selectedProduct.created_at ? new Date(selectedProduct.created_at).toLocaleString() : 'Unknown'}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700">Updated At</Label>
+                    <p className="text-sm text-gray-900">
+                      {selectedProduct.updated_at ? new Date(selectedProduct.updated_at).toLocaleString() : 'Unknown'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {editModalOpen && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-6xl w-full mx-4 max-h-[95vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold">Edit Product: {selectedProduct.name}</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditModalOpen(false);
+                  // Reset variant management state
+                  setShowAddVariant(false);
+                  setNewVariant({
+                    color: '',
+                    size: '',
+                    stock: 0,
+                    lowStockThreshold: 10,
+                    basePrice: '',
+                    salePrice: '',
+                    costPrice: ''
+                  });
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-6 w-6" />
+              </Button>
+            </div>
+
+            <div className="space-y-8">
+              {/* Basic Information Section */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 pb-2 border-b border-gray-200">
+                  <Package className="h-4 w-4 text-blue-600" />
+                  <h3 className="text-sm font-semibold">Basic Information</h3>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-brand" className="block mb-2 text-sm font-medium">Brand *</Label>
+                    <Input
+                      id="edit-brand"
+                      defaultValue={getBrandName(selectedProduct.brand)}
+                      className="h-10 w-full"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-name" className="block mb-2 text-sm font-medium">Product Name *</Label>
+                    <Input
+                      id="edit-name"
+                      value={selectedProduct.name}
+                      onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, name: e.target.value } : null)}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-sku" className="block mb-2 text-sm font-medium">Base SKU *</Label>
+                    <Input
+                      id="edit-sku"
+                      defaultValue={getProductSKU(selectedProduct)}
+                      className="h-10 w-full"
+                      readOnly
+                      disabled
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      This is the base SKU. Variant SKUs will be generated as: BaseSKU-Color-Size (e.g., 4654564-BLUE-L)
+                    </p>
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-title" className="block mb-2 text-sm font-medium">Product Title *</Label>
+                    <Input
+                      id="edit-title"
+                      value={selectedProduct.title || ''}
+                      onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, title: e.target.value } : null)}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="edit-description" className="block mb-2">Description</Label>
+                  <textarea
+                    id="edit-description"
+                    value={selectedProduct.description || ''}
+                    onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, description: e.target.value } : null)}
+                    placeholder="Enter product description"
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-categoryLevel1" className="block mb-2 text-sm font-medium">Target Audience *</Label>
+                    <Select value={selectedProduct.category_level1 || selectedProduct.categoryLevel1 || ''} onValueChange={(value) => {
+                      setSelectedProduct(prev => prev ? { ...prev, category_level1: value, categoryLevel1: value } : null);
+                    }}>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue placeholder="Select audience" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="men">MEN</SelectItem>
+                        <SelectItem value="women">WOMEN</SelectItem>
+                        <SelectItem value="kids">KIDS</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-categoryLevel2" className="block mb-2 text-sm font-medium">Category Type *</Label>
+                    <Select value={selectedProduct.category_level2 || selectedProduct.categoryLevel2 || ''} onValueChange={(value) => {
+                      setSelectedProduct(prev => prev ? { ...prev, category_level2: value, categoryLevel2: value } : null);
+                    }}>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue placeholder="Select category type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="clothing">Clothing</SelectItem>
+                        <SelectItem value="shoes">Shoes</SelectItem>
+                        <SelectItem value="accessories">Accessories</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-categoryLevel3" className="block mb-2 text-sm font-medium">Category Sub-Type *</Label>
+                    {(() => {
+                      const categoryValue = selectedProduct.category_level3 || selectedProduct.categoryLevel3 || extractCategoryLevel3(selectedProduct.category) || '';
+                      
+                      // Additional fallback: try to extract from category string more aggressively
+                      let fallbackValue = '';
+                      if (selectedProduct.category) {
+                        const categoryStr = selectedProduct.category.toLowerCase();
+                        if (categoryStr.includes('shirts') || categoryStr.includes('t-shirts')) {
+                          fallbackValue = 'shirts';
+                        } else if (categoryStr.includes('pants') || categoryStr.includes('jeans')) {
+                          fallbackValue = 'pants';
+                        } else if (categoryStr.includes('dresses')) {
+                          fallbackValue = 'dresses';
+                        } else if (categoryStr.includes('shoes') || categoryStr.includes('sneakers')) {
+                          fallbackValue = 'sneakers';
+                        } else if (categoryStr.includes('accessories') || categoryStr.includes('watches')) {
+                          fallbackValue = 'watches';
+                        }
+                      }
+                      
+                      const finalCategoryValue = categoryValue || fallbackValue;
+                      const categoryLevel1 = selectedProduct.category_level1 || selectedProduct.categoryLevel1 || '';
+                      const categoryLevel2 = selectedProduct.category_level2 || selectedProduct.categoryLevel2 || '';
+                      
+                      console.log('Category Sub-Type field value:', {
+                        category_level3: selectedProduct.category_level3,
+                        categoryLevel3: selectedProduct.categoryLevel3,
+                        category: selectedProduct.category,
+                        extracted: extractCategoryLevel3(selectedProduct.category),
+                        fallbackValue,
+                        finalCategoryValue,
+                        categoryLevel1,
+                        categoryLevel2,
+                        // Debug: Check all possible field variations
+                        allFields: {
+                          'category_level3': selectedProduct.category_level3,
+                          'categoryLevel3': selectedProduct.categoryLevel3,
+                          'category_level_3': (selectedProduct as any).category_level_3,
+                          'categoryLevel_3': (selectedProduct as any).categoryLevel_3
+                        }
+                      });
+                      
+                      // Dynamic category options based on selected levels (same logic as add product form)
+                      const getCategoryOptions = () => {
+                        if (!categoryLevel1 || !categoryLevel2) return [];
+                        
+                        const categoryData = {
+                          men: {
+                            clothing: ['T-shirts', 'Polo Shirts', 'Shirts', 'Hoodies', 'Pants', 'Jeans', 'Shorts', 'Jackets', 'Blazers', 'Suits'],
+                            shoes: ['Sneakers', 'Formal Shoes', 'Casual Shoes', 'Sports Shoes', 'Boots', 'Sandals'],
+                            accessories: ['Watches', 'Belts', 'Wallets', 'Bags', 'Hats', 'Sunglasses', 'Ties', 'Cufflinks']
+                          },
+                          women: {
+                            clothing: ['Salwar Kameez', 'Sarees', 'Kurtis', 'T-shirts', 'Tops', 'Dresses', 'Jeans', 'Pants', 'Skirts', 'Blouses'],
+                            shoes: ['Heels', 'Flats', 'Sneakers', 'Sandals', 'Boots', 'Wedges'],
+                            accessories: ['Jewelry', 'Handbags', 'Scarves', 'Belts', 'Watches', 'Sunglasses']
+                          },
+                          kids: {
+                            clothing: ['T-shirts', 'Dresses', 'Pants', 'Shorts', 'Shirts', 'Sweaters', 'Jackets'],
+                            shoes: ['Sneakers', 'Sandals', 'Formal Shoes', 'Casual Shoes'],
+                            accessories: ['Hats', 'Belts', 'Bags', 'Watches']
+                          }
+                        };
+                        
+                        return categoryData[categoryLevel1 as keyof typeof categoryData]?.[categoryLevel2 as keyof typeof categoryData[keyof typeof categoryData]] || [];
+                      };
+                      
+                      const categoryOptions = getCategoryOptions();
+                      
+                      return (
+                        <Select value={finalCategoryValue} onValueChange={(value) => {
+                          setSelectedProduct(prev => prev ? { ...prev, category_level3: value, categoryLevel3: value } : null);
+                        }}>
+                          <SelectTrigger className="h-10 w-full">
+                            <SelectValue placeholder="Select sub-category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categoryOptions.map((option) => (
+                              <SelectItem key={option} value={option.toLowerCase()}>{option}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-categoryLevel4" className="block mb-2 text-sm font-medium">Specific Item *</Label>
+                    <Input
+                      id="edit-categoryLevel4"
+                      value={selectedProduct.category_level4 || selectedProduct.categoryLevel4 || ''}
+                      onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, category_level4: e.target.value, categoryLevel4: e.target.value } : null)}
+                      placeholder="e.g., Basic T-shirts, Printed T-shirts"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-status" className="block mb-2 text-sm font-medium">Status *</Label>
+                    <Select value={selectedProduct.status} onValueChange={(value) => {
+                      setSelectedProduct(prev => prev ? { ...prev, status: value as 'active' | 'inactive' | 'draft' | 'out_of_stock' } : null);
+                    }}>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                        <SelectItem value="draft">Draft</SelectItem>
+                        <SelectItem value="out_of_stock">Out of Stock</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-barcode" className="block mb-2 text-sm font-medium">Barcode</Label>
+                    <Input
+                      id="edit-barcode"
+                      value={selectedProduct.barcode || ''}
+                      onChange={(e) => setSelectedProduct(prev => prev ? { ...prev, barcode: e.target.value } : null)}
+                      placeholder="Enter barcode"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Color Blocks Section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-gray-200">
+                  <div className="flex items-center space-x-2">
+                    <Palette className="h-4 w-4 text-green-600" />
+                    <h3 className="text-sm font-semibold">Color Variants & Pricing</h3>
+                  </div>
+                  <Button
+                    onClick={handleAddNewVariant}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    disabled={showAddVariant}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Variant
+                  </Button>
+                </div>
+                
+                {/* Add New Variant Form */}
+                {showAddVariant && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-semibold text-blue-900 text-lg">Add New Variant</h4>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCancelAddVariant}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    {/* Info notice */}
+                    <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded">
+                      <p className="text-sm text-blue-800">
+                        <Info className="h-4 w-4 inline mr-2" />
+                        <strong>Note:</strong> New variants will appear immediately in the list below. Click "Save Changes" to persist them to the database.
+                      </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Color *</Label>
+                        <Select value={newVariant.color} onValueChange={(value) => setNewVariant(prev => ({ ...prev, color: value }))}>
+                          <SelectTrigger className="h-10 w-full">
+                            <SelectValue placeholder="Select color" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableColors.map((color) => (
+                              <SelectItem key={color} value={color}>
+                                {color}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Size *</Label>
+                        <Select value={newVariant.size} onValueChange={(value) => setNewVariant(prev => ({ ...prev, size: value }))}>
+                          <SelectTrigger className="h-10 w-full">
+                            <SelectValue placeholder="Select size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableSizes.map((size) => (
+                              <SelectItem key={size} value={size}>
+                                {size}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-5 gap-4 mb-4">
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Stock Quantity</Label>
+                        <Input
+                          type="number"
+                          value={newVariant.stock}
+                          onChange={(e) => setNewVariant(prev => ({ ...prev, stock: parseInt(e.target.value) || 0 }))}
+                          className="h-10 w-full"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Low Stock Threshold</Label>
+                        <Input
+                          type="number"
+                          value={newVariant.lowStockThreshold}
+                          onChange={(e) => setNewVariant(prev => ({ ...prev, lowStockThreshold: parseInt(e.target.value) || 0 }))}
+                          className="h-10 w-full"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Base Price</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={newVariant.basePrice}
+                          onChange={(e) => setNewVariant(prev => ({ ...prev, basePrice: e.target.value }))}
+                          placeholder="0.00"
+                          className="h-10 w-full"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Sale Price</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={newVariant.salePrice}
+                          onChange={(e) => setNewVariant(prev => ({ ...prev, salePrice: e.target.value }))}
+                          placeholder="0.00"
+                          className="h-10 w-full"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="block mb-2 text-sm font-medium text-blue-900">Cost Price</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={newVariant.costPrice}
+                          onChange={(e) => setNewVariant(prev => ({ ...prev, costPrice: e.target.value }))}
+                          placeholder="0.00"
+                          className="h-10 w-full"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-end space-x-3">
+                      <Button
+                        variant="outline"
+                        onClick={handleCancelAddVariant}
+                        className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveNewVariant}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        disabled={!newVariant.color || !newVariant.size}
+                      >
+                        Add Variant
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Existing Variants */}
+                {selectedProduct.variants && selectedProduct.variants.length > 0 ? (
+                  <div className="space-y-4">
+                    {selectedProduct.variants.map((variant, index) => (
+                      <div key={variant.id} className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="font-semibold text-gray-900 text-lg">
+                              Color: {variant.color?.name || 'Unknown'} | Size: {variant.size?.name || 'Unknown'}
+                            </h4>
+                            {variant.id < 0 && (
+                              <Badge className="bg-yellow-100 text-yellow-800 text-xs">
+                                New (Temporary)
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleVariantDelete(variant.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-4">
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Stock Quantity</Label>
+                            <Input
+                              type="number"
+                              value={variant.stock}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'stock', parseInt(e.target.value) || 0)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Low Stock Threshold</Label>
+                            <Input
+                              type="number"
+                              value={variant.lowStockThreshold || 0}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'lowStockThreshold', parseInt(e.target.value) || 0)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Base Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'price', e.target.value)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Sale Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.discount_price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'discount_price', e.target.value)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="block mb-2 text-sm font-medium">Cost Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={variant.cost_price || ''}
+                              onChange={(e) => handleVariantUpdate(variant.id, 'cost_price', e.target.value)}
+                              className="h-10 w-full"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div className="mt-4">
+                          <Label className="block mb-2 text-sm font-medium">SKU</Label>
+                          <Input
+                            value={variant.sku}
+                            onChange={(e) => handleVariantUpdate(variant.id, 'sku', e.target.value)}
+                            className="h-10 w-full"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No variants found for this product.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Inventory Settings Section */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 pb-2 border-b border-gray-200">
+                  <Hash className="h-4 w-4 text-green-600" />
+                  <h3 className="text-sm font-semibold">Inventory & Stock</h3>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-min-order" className="block mb-2 text-sm font-medium">Minimum Order Quantity</Label>
+                    <Input
+                      id="edit-min-order"
+                      type="number"
+                      defaultValue={selectedProduct.min_order_quantity || '1'}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-max-order" className="block mb-2 text-sm font-medium">Maximum Order Quantity</Label>
+                    <Input
+                      id="edit-max-order"
+                      type="number"
+                      defaultValue={selectedProduct.max_order_quantity || ''}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-shipping-weight" className="block mb-2 text-sm font-medium">Shipping Weight (kg)</Label>
+                    <Input
+                      id="edit-shipping-weight"
+                      type="number"
+                      step="0.01"
+                      defaultValue={selectedProduct.shipping_weight || ''}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-shipping-class" className="block mb-2 text-sm font-medium">Shipping Class</Label>
+                    <Input
+                      id="edit-shipping-class"
+                      defaultValue={selectedProduct.shipping_class || ''}
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-track-inventory" className="block mb-2 text-sm font-medium">Track Inventory</Label>
+                    <Select defaultValue={selectedProduct.track_inventory ? 'true' : 'false'}>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-allow-backorders" className="block mb-2 text-sm font-medium">Allow Backorders</Label>
+                    <Select defaultValue={selectedProduct.allow_backorders ? 'true' : 'false'}>
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* SEO & Meta Information Section */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 pb-2 border-b border-gray-200">
+                  <Globe className="h-4 w-4 text-purple-600" />
+                  <h3 className="text-sm font-semibold">SEO & Meta Information</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="edit-meta-title" className="block mb-2 text-sm font-medium">Meta Title</Label>
+                    <Input
+                      id="edit-meta-title"
+                      defaultValue={selectedProduct.meta_title || ''}
+                      placeholder="Enter meta title for SEO"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="edit-meta-description" className="block mb-2 text-sm font-medium">Meta Description</Label>
+                    <textarea
+                      id="edit-meta-description"
+                      defaultValue={selectedProduct.meta_description || ''}
+                      placeholder="Enter meta description for SEO"
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="edit-keywords" className="block mb-2 text-sm font-medium">Keywords</Label>
+                    <Input
+                      id="edit-keywords"
+                      defaultValue={selectedProduct.keywords || ''}
+                      placeholder="Enter keywords separated by commas"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tax & Shipping Section */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2 pb-2 border-b border-gray-200">
+                  <Truck className="h-4 w-4 text-orange-600" />
+                  <h3 className="text-sm font-semibold">Tax & Shipping</h3>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="w-full">
+                    <Label htmlFor="edit-tax-class" className="block mb-2 text-sm font-medium">Tax Class</Label>
+                    <Input
+                      id="edit-tax-class"
+                      defaultValue={selectedProduct.tax_class || ''}
+                      placeholder="Enter tax class"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                  
+                  <div className="w-full">
+                    <Label htmlFor="edit-tax-rate" className="block mb-2 text-sm font-medium">Tax Rate (%)</Label>
+                    <Input
+                      id="edit-tax-rate"
+                      type="number"
+                      step="0.01"
+                      defaultValue={selectedProduct.tax_rate || ''}
+                      placeholder="Enter tax rate percentage"
+                      className="h-10 w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-6 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-6 py-2"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSaveProduct}
+                  className="bg-blue-600 hover:bg-blue-700 px-6 py-2"
+                >
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

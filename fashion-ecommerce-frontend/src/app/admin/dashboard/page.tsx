@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import SalesChart from "@/components/SalesChart";
+import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -24,6 +25,11 @@ export default function AdminDashboard() {
     ordersToday: 0
   });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Check authentication on component mount
+  useEffect(() => {
+    requireAdminAuth(router);
+  }, [router]);
 
   // Animated counters
   useEffect(() => {
@@ -79,7 +85,7 @@ export default function AdminDashboard() {
   }, []);
 
   const handleLogout = () => {
-    router.push('/admin/signin');
+    adminLogout(router);
   };
 
   const handleAddBrand = () => {
@@ -494,6 +500,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 
+
                 <div className="flex items-start space-x-2 p-2 bg-indigo-50 rounded-lg">
                   <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-1.5 flex-shrink-0"></div>
                   <div className="flex-1 min-w-0">

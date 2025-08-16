@@ -22,6 +22,7 @@ import {
 import { useState, useEffect } from "react";
 import { apiService } from "@/lib/api";
 import { toast } from "sonner";
+import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
 
 interface Brand {
   id: number;
@@ -134,6 +135,11 @@ export default function BrandsPage() {
   useEffect(() => {
     loadBrands();
   }, [currentPage, searchTerm, statusFilter, categoryFilter, dateFilter]);
+
+  // Check authentication on component mount
+  useEffect(() => {
+    requireAdminAuth(router);
+  }, [router]);
 
   // Add focus event listener to refresh brands when returning to the page
   useEffect(() => {
@@ -544,7 +550,7 @@ export default function BrandsPage() {
   };
 
   const handleLogout = () => {
-    router.push('/admin/signin');
+    adminLogout(router);
   };
 
   const handleFetchCredentials = async (brandId: number) => {
@@ -1629,7 +1635,7 @@ Owner: ${brand.owner_full_name || 'NOT LOADED'}
                     />
                   </div>
                   {/* Status field removed - backend doesn't allow status updates */}
-                </div>
+                  </div>
                 
                 {/* Status Change Notice */}
                 <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">

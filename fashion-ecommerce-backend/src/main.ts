@@ -3,6 +3,16 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AppAuthGuard } from './auth/guards/app-auth.guard';
+import * as dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
+
+// Debug: Log environment variables
+console.log('Environment variables loaded:');
+console.log('JWT_SECRET:', process.env.JWT_SECRET ? 'SET' : 'NOT SET');
+console.log('PORT:', process.env.PORT);
+console.log('DB_DATABASE:', process.env.DB_DATABASE);
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

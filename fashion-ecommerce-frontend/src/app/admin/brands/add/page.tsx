@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { apiService } from "@/lib/api";
+import { adminLogout, requireAdminAuth } from "@/lib/admin-auth";
+import { toast } from "sonner";
 
 export default function AddBrand() {
   const router = useRouter();
@@ -219,6 +221,11 @@ export default function AddBrand() {
     }
   }, []);
 
+  // Check authentication on component mount
+  useEffect(() => {
+    requireAdminAuth(router);
+  }, [router]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -381,7 +388,7 @@ Password: ${credentials.password}
   };
 
   const handleLogout = () => {
-    router.push('/admin/signin');
+    adminLogout(router);
   };
 
   return (

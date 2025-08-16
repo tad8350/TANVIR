@@ -6,6 +6,7 @@ import { ProductVariant } from './entities/product-variant.entity';
 import { Color } from './entities/color.entity';
 import { Size } from './entities/size.entity';
 import { ProductImage } from './entities/product-image.entity';
+import { BrandProfile } from '../users/entities/brand-profile.entity';
 import { CreateProductDto, UpdateProductDto, ColorBlockDto } from './dto/product.dto';
 
 @Injectable()
@@ -21,6 +22,8 @@ export class ProductsService {
     private sizeRepository: Repository<Size>,
     @InjectRepository(ProductImage)
     private productImageRepository: Repository<ProductImage>,
+    @InjectRepository(BrandProfile)
+    private brandRepository: Repository<BrandProfile>,
   ) {}
 
   async findAll(page: number = 1, limit: number = 10, filters: any = {}) {
@@ -42,7 +45,7 @@ export class ProductsService {
     
     const [products, total] = await this.productRepository.findAndCount({
       where,
-      relations: ['brand', 'categoryRelation', 'variants', 'images'],
+      relations: ['brand', 'categoryRelation', 'variants', 'variants.color', 'variants.size', 'images'],
       skip,
       take: limit,
       order: { created_at: 'DESC' },
@@ -71,7 +74,7 @@ export class ProductsService {
   async findOne(id: number) {
     const product = await this.productRepository.findOne({
       where: { id },
-      relations: ['brand', 'categoryRelation', 'variants', 'images'],
+      relations: ['brand', 'categoryRelation', 'variants', 'variants.color', 'variants.size', 'images'],
       select: [
         'id', 'name', 'title', 'description', 'shortDescription', 'price', 'salePrice', 'costPrice',
         'barcode', 'category_id', 'categoryLevel1', 'categoryLevel2', 'categoryLevel3', 'categoryLevel4',
@@ -114,9 +117,23 @@ export class ProductsService {
       ...productData 
     } = createProductDto;
 
+    // Handle brand - find by name and get ID
+    let brandId: number | undefined;
+    if (brand) {
+      const brandProfile = await this.brandRepository.findOne({
+        where: { brand_name: brand }
+      });
+      if (brandProfile) {
+        brandId = brandProfile.id;
+      } else {
+        throw new BadRequestException(`Brand '${brand}' not found. Please create the brand first.`);
+      }
+    }
+
     // Create product with proper type conversion and null handling
     const product = this.productRepository.create({
       ...productData,
+      brand_id: brandId, // Set the brand_id
       price: price ? parseFloat(price) : undefined,
       salePrice: salePrice ? parseFloat(salePrice) : undefined,
       costPrice: costPrice ? parseFloat(costPrice) : undefined,
@@ -183,14 +200,15 @@ export class ProductsService {
             });
           }
 
-          // Create product variant
+          // Create product variant with size-level pricing
           const variant = this.productVariantRepository.create({
             product_id: product.id,
             color_id: color.id,
             size_id: size.id,
             stock: parseInt(sizeData.quantity || '0'),
-            price: product.price,
-            discount_price: product.salePrice,
+            lowStockThreshold: sizeData.lowStockThreshold ? parseInt(sizeData.lowStockThreshold) : undefined,
+            price: sizeData.basePrice ? parseFloat(sizeData.basePrice) : product.price,
+            discount_price: sizeData.salePrice ? parseFloat(sizeData.salePrice) : product.salePrice,
             sku: `${product.sku}-${color.name}-${size.name}`.toUpperCase().replace(/\s+/g, '-'),
           });
 

@@ -21,7 +21,7 @@ export interface ProductFormData {
   title: string;
   description?: string;
   shortDescription?: string;
-  price: string;
+  price?: string; // Made optional since pricing is now handled at size level within color blocks
   salePrice?: string;
   costPrice?: string;
   sku: string;
@@ -39,10 +39,15 @@ export interface ProductFormData {
     color: string;
     newColor: string;
     images: File[];
+    // Pricing moved to size level - no more color-level pricing
     sizes: Array<{
       id: string;
       size: string;
       quantity: string;
+      lowStockThreshold: string;
+      basePrice: string;
+      salePrice?: string;
+      costPrice?: string;
     }>;
   }>;
   images: string[];

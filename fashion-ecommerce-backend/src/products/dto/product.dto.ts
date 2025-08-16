@@ -17,6 +17,26 @@ export class ColorBlockSizeDto {
   @IsOptional()
   @IsString()
   quantity?: string;
+
+  @ApiProperty({ description: 'Low stock threshold', example: '10', required: false })
+  @IsOptional()
+  @IsString()
+  lowStockThreshold?: string;
+
+  @ApiProperty({ description: 'Base price for this size', example: '99.99', required: false })
+  @IsOptional()
+  @IsString()
+  basePrice?: string;
+
+  @ApiProperty({ description: 'Sale price for this size', example: '79.99', required: false })
+  @IsOptional()
+  @IsString()
+  salePrice?: string;
+
+  @ApiProperty({ description: 'Cost price for this size', example: '50.00', required: false })
+  @IsOptional()
+  @IsString()
+  costPrice?: string;
 }
 
 export class ColorBlockDto {
