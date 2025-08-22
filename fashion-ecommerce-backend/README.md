@@ -136,7 +136,7 @@ This is the basic setup. Next phases will include:
 - Shopping cart functionality
 - Order processing
 - Payment integration
-- Search with Elasticsearch
+
 - Image upload with Cloudinary/AWS S3
 - Email notifications
 - Admin panel

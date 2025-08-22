@@ -97,6 +97,12 @@ export default function Dashboard() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Luxury brand data
   const luxuryBrands = [
@@ -154,6 +160,133 @@ export default function Dashboard() {
 
     fetchData();
   }, []);
+
+  // Search function
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) {
+      setShowSearchResults(false);
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      // For now, we'll do client-side search since the backend search API might not be ready
+      const filtered = products.filter(product => {
+        const searchTerm = query.toLowerCase();
+        const productName = (product.name || product.title || '').toLowerCase();
+        const brandName = typeof product.brand === 'string' 
+          ? product.brand.toLowerCase() 
+          : (product.brand?.brand_name || '').toLowerCase();
+        const category = (product.categoryLevel1 || product.category || '').toLowerCase();
+        
+        return productName.includes(searchTerm) || 
+               brandName.includes(searchTerm) || 
+               category.includes(searchTerm);
+      });
+      
+      setSearchResults(filtered);
+      setShowSearchResults(true);
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleSearch(searchQuery);
+  };
+
+  // Real-time search as user types
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    
+    if (value.trim()) {
+      // Debounce the search to avoid too many searches while typing
+      const timeoutId = setTimeout(() => {
+        handleSearch(value);
+      }, 300);
+      
+      return () => clearTimeout(timeoutId);
+    } else {
+      setShowSearchResults(false);
+      setSearchResults([]);
+    }
+  };
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSearch(searchQuery);
+    } else if (e.key === 'Escape') {
+      setShowSearchResults(false);
+      setSearchQuery("");
+      setSearchResults([]);
+    }
+  };
+
+  // Generate search suggestions based on available products
+  const generateSearchSuggestions = () => {
+    const suggestions = new Set<string>();
+    
+    // Add brand names
+    products.forEach(product => {
+      if (typeof product.brand === 'string') {
+        suggestions.add(product.brand);
+      } else if (product.brand?.brand_name) {
+        suggestions.add(product.brand.brand_name);
+      }
+    });
+    
+    // Add category names
+    products.forEach(product => {
+      if (product.categoryLevel1) {
+        suggestions.add(product.categoryLevel1);
+      }
+      if (product.categoryLevel2) {
+        suggestions.add(product.categoryLevel2);
+      }
+    });
+    
+    // Add popular product names (first few words)
+    products.forEach(product => {
+      const name = product.name || product.title || '';
+      const words = name.split(' ').slice(0, 2).join(' ');
+      if (words.length > 2) {
+        suggestions.add(words);
+      }
+    });
+    
+    return Array.from(suggestions).slice(0, 8);
+  };
+
+  // Show suggestions when input is focused
+  const handleInputFocus = () => {
+    if (searchQuery.trim().length < 2) {
+      setSearchSuggestions(generateSearchSuggestions());
+      setShowSuggestions(true);
+    }
+  };
+
+  // Hide suggestions when clicking outside
+  const handleInputBlur = () => {
+    // Delay hiding to allow clicking on suggestions
+    setTimeout(() => {
+      setShowSuggestions(false);
+    }, 200);
+  };
+
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
+    setSearchQuery(suggestion);
+    setShowSuggestions(false);
+    handleSearch(suggestion);
+  };
 
   // Transform products for display
   const transformProductForDisplay = (product: Product) => {
@@ -317,9 +450,61 @@ export default function Dashboard() {
               crafted with <span className="text-emerald-400 font-medium">uncompromising</span> quality.
             </p>
             
-            {/* Search Bar - REMOVED */}
+            {/* Search Bar - IMPLEMENTED */}
             <div className="mb-12">
-              {/* Search functionality removed - will be implemented later */}
+              <form onSubmit={handleSearchSubmit} className="max-w-2xl mx-auto">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Search className="h-6 w-6 text-amber-400" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search for luxury products, brands, or categories..."
+                    value={searchQuery}
+                    onChange={handleSearchInputChange}
+                    onKeyDown={handleKeyDown}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    className="w-full pl-12 pr-4 py-4 bg-white/10 backdrop-blur-sm border-2 border-amber-400/30 rounded-full text-white placeholder-amber-200/70 focus:outline-none focus:border-amber-400 focus:bg-white/20 transition-all duration-300 text-lg font-light"
+                  />
+                  {isSearching && (
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-400"></div>
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center"
+                  >
+                    <div className="bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-black font-bold px-6 py-2 rounded-full transition-all duration-300 transform hover:scale-105 shadow-lg shadow-amber-500/25">
+                      {isSearching ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black mx-auto"></div>
+                      ) : (
+                        'Search'
+                      )}
+                    </div>
+                  </button>
+                </div>
+                
+                {/* Search Suggestions Dropdown */}
+                {showSuggestions && searchSuggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white/95 backdrop-blur-sm rounded-2xl border-2 border-amber-400/30 shadow-2xl shadow-amber-500/25 z-50 max-h-64 overflow-y-auto">
+                    <div className="p-2">
+                      <div className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-2 px-3">Popular Searches</div>
+                      {searchSuggestions.map((suggestion, index) => (
+                        <button
+                          key={index}
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-amber-50 hover:text-amber-800 transition-all duration-200 text-sm font-light"
+                        >
+                          <Search className="inline h-3 w-3 mr-2 text-amber-500" />
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </form>
             </div>
 
             {/* CTA Buttons - REDUCED */}
@@ -356,8 +541,162 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Search Results Section - REMOVED */}
-      {/* Search results functionality removed - will be implemented later */}
+      {/* Search Results Section - IMPLEMENTED */}
+      {showSearchResults && (
+        <section className="py-16 bg-gradient-to-b from-white via-neutral-50 to-stone-50">
+          <div className="container mx-auto px-4">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-thin text-stone-800 mb-2">
+                  Search Results for "{searchQuery}"
+                </h2>
+                <p className="text-lg text-stone-600 font-light">
+                  Found {searchResults.length} luxury products
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowSearchResults(false);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                  }}
+                  className="border-2 border-purple-600 text-purple-600 hover:bg-purple-600 hover:text-white font-semibold px-6 py-2 rounded-lg transition-all duration-300"
+                >
+                  <ArrowRight className="h-4 w-4 mr-2 rotate-180" />
+                  Back to All
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowSearchResults(false);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                  }}
+                  className="border-2 border-amber-600 text-amber-600 hover:bg-amber-600 hover:text-white font-semibold px-6 py-2 rounded-lg transition-all duration-300"
+                >
+                  Clear Search
+                </Button>
+              </div>
+            </div>
+            
+            {isSearching ? (
+              <div className="text-center py-20">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-400 mx-auto mb-4"></div>
+                <p className="text-amber-600 font-light text-lg">Searching luxury collection...</p>
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="text-amber-500 text-6xl mb-6">🔍</div>
+                <h3 className="text-2xl font-light text-stone-700 mb-3">No Results Found</h3>
+                <p className="text-stone-500 font-light text-lg mb-6">Try adjusting your search terms or browse our featured collection</p>
+                <div className="flex flex-wrap justify-center gap-3 max-w-2xl mx-auto">
+                  <span className="text-xs text-stone-400 font-light">Popular searches:</span>
+                  {generateSearchSuggestions().slice(0, 5).map((suggestion, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleSuggestionClick(suggestion)}
+                      className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-medium hover:bg-amber-200 transition-colors duration-200"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {searchResults.map((product) => {
+                  const displayProduct = transformProductForDisplay(product);
+                  return (
+                    <div 
+                      key={product.id} 
+                      className="group cursor-pointer bg-gradient-to-br from-black via-purple-900 to-black rounded-2xl overflow-hidden hover:bg-gradient-to-br hover:from-black hover:via-purple-800 hover:to-black hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-purple-700 hover:border-purple-500 hover:shadow-purple-500/30"
+                      onClick={() => handleProductClick(product.id)}
+                    >
+                      {/* Product Image */}
+                      <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-stone-50 to-neutral-50">
+                        <img
+                          src={displayProduct.image}
+                          alt={displayProduct.name}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        />
+                        {/* Quick Actions */}
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 space-y-1">
+                          <button 
+                            className="w-6 h-6 bg-white/95 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white transition-colors duration-200 border border-purple-200"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            <Heart className="h-3 w-3 text-purple-600" />
+                          </button>
+                          <button 
+                            className="w-6 h-6 bg-white/95 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white transition-colors duration-200 border border-purple-200"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            <Eye className="h-3 w-3 text-purple-600" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Product Info */}
+                      <div className="p-3">
+                        {/* Brand & Category */}
+                        <div className="mb-1">
+                          <p className="text-xs font-medium text-purple-200 uppercase tracking-wide mb-1">
+                            {displayProduct.brand}
+                          </p>
+                          <p className="text-xs text-purple-300 font-light">
+                            {displayProduct.category}
+                          </p>
+                        </div>
+                        
+                        {/* Product Name */}
+                        <h3 className="text-sm font-semibold text-white mb-1 line-clamp-2 group-hover:text-amber-200 transition-colors duration-200">
+                          {displayProduct.name}
+                        </h3>
+                        
+                        {/* Rating & Reviews */}
+                        <div className="flex items-center space-x-1 mb-2">
+                          <div className="flex items-center space-x-1">
+                            {[...Array(5)].map((_, i) => (
+                              <Star 
+                                key={i} 
+                                className={`h-2 w-2 ${i < Math.floor(displayProduct.rating) ? 'text-amber-400 fill-current' : 'text-purple-400'}`} 
+                              />
+                            ))}
+                          </div>
+                          <span className="text-xs text-purple-200 font-medium">
+                            ({displayProduct.reviews})
+                          </span>
+                        </div>
+                        
+                        {/* Price Section */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-base font-bold text-white">
+                            {displayProduct.price}
+                          </span>
+                          <button 
+                            className="w-6 h-6 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 hover:scale-110"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            <ShoppingCart className="h-3 w-3 text-white" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Luxury Features Section - REDUCED */}
       <section className="py-20 bg-gradient-to-b from-stone-50 via-neutral-50 to-zinc-50">

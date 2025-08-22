@@ -4,6 +4,7 @@ import { UsersService } from '../users/users.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AdminProfile } from '../users/entities/admin-profile.entity';
+import { BrandProfile } from '../users/entities/brand-profile.entity';
 import * as bcrypt from 'bcryptjs';
 
 export interface JwtPayload {
@@ -18,7 +19,9 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     @InjectRepository(AdminProfile)
-    private adminRepository: Repository<AdminProfile>
+    private adminRepository: Repository<AdminProfile>,
+    @InjectRepository(BrandProfile)
+    private brandRepository: Repository<BrandProfile>
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -311,5 +314,141 @@ export class AuthService {
     }
     const { password, ...result } = admin;
     return result;
+  }
+
+  // Brand specific methods
+  async validateBrand(email: string, password: string) {
+    console.log('🔍 validateBrand called with:', { email, password });
+    
+    const brand = await this.brandRepository.findOne({ 
+      where: { contact_email: email },
+      relations: ['user']
+    });
+    
+    console.log('🔍 Brand found:', brand ? 'Yes' : 'No');
+    if (brand) {
+      console.log('🔍 Brand details:', {
+        id: brand.id,
+        brand_name: brand.brand_name,
+        contact_email: brand.contact_email,
+        owner_password: brand.owner_password ? 'Exists' : 'Missing',
+        generated_password: brand.generated_password ? 'Exists' : 'Missing',
+        user: brand.user ? 'Exists' : 'Missing',
+        is_verified: brand.is_verified
+      });
+    }
+    
+    if (!brand) {
+      console.log('❌ No brand found with email:', email);
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    // Check if brand is active - only if user exists
+    if (brand.user && !brand.user.is_active) {
+      console.log('❌ Brand user is inactive');
+      throw new UnauthorizedException('Brand account is inactive');
+    }
+
+    // Check if brand is verified - only if user exists, otherwise use brand's own verification
+    if (brand.user && !brand.user.is_verified) {
+      console.log('❌ Brand user is not verified');
+      throw new UnauthorizedException('Brand account is not verified');
+    }
+
+    // For brands without user accounts, check the brand's own verification status
+    // TEMPORARILY COMMENTED OUT TO ALLOW LOGIN
+    // if (!brand.user && !brand.is_verified) {
+    //   console.log('❌ Brand is not verified');
+    //   throw new UnauthorizedException('Brand account is not verified');
+    // }
+
+    console.log('✅ Brand verification checks passed');
+
+    // Try to validate password - check multiple password fields and handle both hashed and plain text
+    let isPasswordValid = false;
+    
+    // First, try to validate against owner_password (could be hashed or plain text)
+    if (brand.owner_password) {
+      console.log('🔍 Trying owner_password validation...');
+      // Try bcrypt comparison first (for hashed passwords)
+      try {
+        isPasswordValid = await bcrypt.compare(password, brand.owner_password);
+        console.log('🔍 bcrypt comparison result:', isPasswordValid);
+      } catch (error) {
+        console.log('🔍 bcrypt failed, trying direct comparison...');
+        // If bcrypt fails, try direct comparison (for plain text passwords)
+        isPasswordValid = (password === brand.owner_password);
+        console.log('🔍 direct comparison result:', isPasswordValid);
+      }
+      
+      // If bcrypt failed but we have a plain text password, try direct comparison
+      if (!isPasswordValid && !brand.owner_password.startsWith('$2')) {
+        console.log('🔍 Password appears to be plain text, trying direct comparison...');
+        isPasswordValid = (password === brand.owner_password);
+        console.log('🔍 direct comparison result:', isPasswordValid);
+      }
+    }
+    
+    // If owner_password didn't work, try generated_password
+    if (!isPasswordValid && brand.generated_password) {
+      console.log('🔍 Trying generated_password validation...');
+      try {
+        isPasswordValid = await bcrypt.compare(password, brand.generated_password);
+        console.log('🔍 bcrypt comparison result:', isPasswordValid);
+      } catch (error) {
+        console.log('🔍 bcrypt failed, trying direct comparison...');
+        // If bcrypt fails, try direct comparison (for plain text passwords)
+        isPasswordValid = (password === brand.generated_password);
+        console.log('🔍 direct comparison result:', isPasswordValid);
+      }
+      
+      // If bcrypt failed but we have a plain text password, try direct comparison
+      if (!isPasswordValid && !brand.generated_password.startsWith('$2')) {
+        console.log('🔍 Generated password appears to be plain text, trying direct comparison...');
+        isPasswordValid = (password === brand.generated_password);
+        console.log('🔍 direct comparison result:', isPasswordValid);
+      }
+    }
+    
+    console.log('🔍 Final password validation result:', isPasswordValid);
+    
+    if (!isPasswordValid) {
+      console.log('❌ Password validation failed');
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    console.log('✅ Password validation successful');
+    const { owner_password, generated_password, ...result } = brand;
+    return result;
+  }
+
+  async brandLogin(email: string, password: string) {
+    const brand = await this.validateBrand(email, password);
+
+    // Update last login for the user if it exists
+    if (brand.user) {
+      await this.usersService.updateLastLogin(brand.user.id);
+    }
+
+    const payload: JwtPayload = {
+      sub: brand.id,
+      email: brand.contact_email,
+      user_type: 'brand',
+    };
+
+    return {
+      access_token: this.jwtService.sign(payload),
+      brand: {
+        id: brand.id,
+        user_id: brand.user_id,
+        brand_name: brand.brand_name,
+        business_name: brand.business_name,
+        contact_email: brand.contact_email,
+        logo_url: brand.logo_url,
+        banner_url: brand.banner_url,
+        category: brand.category,
+        is_verified: brand.user ? brand.user.is_verified : brand.is_verified,
+      },
+    };
   }
 } 

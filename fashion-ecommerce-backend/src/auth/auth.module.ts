@@ -10,11 +10,12 @@ import { AppAuthGuard } from './guards/app-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { UsersModule } from '../users/users.module';
 import { AdminProfile } from '../users/entities/admin-profile.entity';
+import { BrandProfile } from '../users/entities/brand-profile.entity';
 
 @Module({
   imports: [
     UsersModule,
-    TypeOrmModule.forFeature([AdminProfile]),
+    TypeOrmModule.forFeature([AdminProfile, BrandProfile]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

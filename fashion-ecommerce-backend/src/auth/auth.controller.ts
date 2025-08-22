@@ -87,6 +87,16 @@ export class AuthController {
     return this.authService.adminLogin(loginDto.email, loginDto.password);
   }
 
+  @Post('brand/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Brand login' })
+  @ApiResponse({ status: 200, description: 'Login successful' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  async brandLogin(@Body() loginDto: LoginDto) {
+    return this.authService.brandLogin(loginDto.email, loginDto.password);
+  }
+
   @Post('admin/setup-super-admin')
   @Public()
   @HttpCode(HttpStatus.CREATED)
