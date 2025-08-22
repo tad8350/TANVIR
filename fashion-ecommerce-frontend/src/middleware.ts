@@ -7,10 +7,11 @@ export function middleware(request: NextRequest) {
   // Check if user is authenticated
   const token = request.cookies.get('token')?.value;
   const adminToken = request.cookies.get('admin_token')?.value;
+  const brandToken = request.cookies.get('brand_token')?.value;
   const userData = request.cookies.get('user')?.value;
   
   // Public routes that don't require authentication
-  const publicRoutes = ['/auth/signin', '/auth/signup', '/', '/admin/signin'];
+  const publicRoutes = ['/auth/signin', '/auth/signup', '/', '/admin/signin', '/brand/signin'];
   
   // Check if the current path is a public route
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
@@ -32,9 +33,27 @@ export function middleware(request: NextRequest) {
       return NextResponse.next();
     }
   }
+
+  // Handle brand routes specifically
+  if (pathname.startsWith('/brand')) {
+    // If accessing brand routes without brand token, redirect to brand signin
+    if (!brandToken && pathname !== '/brand/signin') {
+      return NextResponse.redirect(new URL('/brand/signin', request.url));
+    }
+    
+    // If accessing brand signin while already authenticated, redirect to brand dashboard
+    if (brandToken && pathname === '/brand/signin') {
+      return NextResponse.redirect(new URL('/brand/dashboard', request.url));
+    }
+    
+    // Allow access to brand routes if brand token exists
+    if (brandToken) {
+      return NextResponse.next();
+    }
+  }
   
   // Handle regular user routes
-  if (!pathname.startsWith('/admin')) {
+  if (!pathname.startsWith('/admin') && !pathname.startsWith('/brand')) {
     // If accessing a protected route without authentication, redirect to signin
     if (!token && !isPublicRoute) {
       return NextResponse.redirect(new URL('/auth/signin', request.url));

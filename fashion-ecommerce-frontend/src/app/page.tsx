@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
+import Header from "@/components/layout/header";
 
 interface User {
   id: number;
@@ -142,31 +143,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-900 via-white-800 to-white-900">
-      {/* Header */}
-      <header className="bg-white/10 backdrop-blur-sm border-b border-white/20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-serif text-white font-bold">TAD</h1>
-              <p className="text-white/80 text-sm ml-4">The Apparel District</p>
-            </div>
-            <div className="flex items-center space-x-4">
-              {user ? (
-                <Button 
-                  onClick={handleLogout} 
-                  className="bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-yellow-700 text-black font-semibold"
-                >
-                  Logout
-                </Button>
-              ) : (
-                <Button onClick={() => router.push('/auth/signin')} className="bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-yellow-700 text-black font-semibold">
-                  Sign In
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
+      <Header />
 
       {/* Main Content */}
       <main className="flex items-center justify-center min-h-[calc(100vh-4rem)]">

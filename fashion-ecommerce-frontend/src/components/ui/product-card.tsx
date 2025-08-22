@@ -3,6 +3,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Star, ShoppingCart, Heart } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface ProductCardProps {
   id: number;
@@ -42,9 +43,15 @@ export default function ProductCard({
   availableColors = [],
   availableSizes = []
 }: ProductCardProps) {
+  const router = useRouter();
+
+  const handleProductClick = () => {
+    router.push(`/product/${id}`);
+  };
+
   return (
     <div className="group">
-      <Card className="overflow-hidden hover:shadow-lg transition-all duration-200">
+      <Card className="overflow-hidden hover:shadow-lg transition-all duration-200 cursor-pointer" onClick={handleProductClick}>
         <CardContent className="p-0">
           <div className="relative">
             <div className="bg-gradient-to-br from-gray-100 to-gray-200 h-64 flex items-center justify-center">

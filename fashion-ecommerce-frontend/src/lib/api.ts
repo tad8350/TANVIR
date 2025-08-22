@@ -16,6 +16,21 @@ export interface AdminLoginResponse {
   };
 }
 
+export interface BrandLoginResponse {
+  access_token: string;
+  brand: {
+    id: number;
+    user_id: number;
+    brand_name: string;
+    business_name: string;
+    contact_email: string;
+    logo_url: string;
+    banner_url: string;
+    category: string;
+    is_verified: boolean;
+  };
+}
+
 export interface ProductFormData {
   name: string;
   title: string;
@@ -87,16 +102,36 @@ function getToken(): string | null {
   return tokenCookie ? tokenCookie.split('=')[1] : null;
 }
 
+// Helper function to get brand token from cookies
+function getBrandToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const cookies = document.cookie.split(';');
+  const tokenCookie = cookies.find(cookie => cookie.trim().startsWith('brand_token='));
+  return tokenCookie ? tokenCookie.split('=')[1] : null;
+}
+
 // Helper function to set token in cookies
 function setToken(token: string): void {
   if (typeof document === 'undefined') return;
   document.cookie = `admin_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
 }
 
+// Helper function to set brand token in cookies
+function setBrandToken(token: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `brand_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+}
+
 // Helper function to remove token from cookies
 function removeToken(): void {
   if (typeof document === 'undefined') return;
   document.cookie = 'admin_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
+}
+
+// Helper function to remove brand token from cookies
+function removeBrandToken(): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = 'brand_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
 }
 
 class ApiService {
@@ -168,6 +203,59 @@ class ApiService {
       return data;
     } catch (error) {
       console.error('API Error:', error);
+      throw error;
+    }
+  }
+
+  async brandLogin(email: string, password: string): Promise<BrandLoginResponse> {
+    const url = `${API_BASE_URL}/auth/brand/login`;
+    
+    console.log('🔍 brandLogin called with:', { email, password });
+    console.log('🔍 API URL:', url);
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    const config: RequestInit = {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email, password }),
+    };
+
+    console.log('🔍 Request config:', config);
+
+    try {
+      console.log('🔍 Sending request to backend...');
+      const response = await fetch(url, config);
+      console.log('🔍 Response status:', response.status);
+      console.log('🔍 Response headers:', response.headers);
+      
+      const data = await response.json();
+      console.log('🔍 Response data:', data);
+
+      if (!response.ok) {
+        console.log('❌ Response not OK, throwing error:', data.message);
+        throw new Error(data.message || 'API request failed');
+      }
+
+      console.log('✅ Login successful, storing token...');
+      // Store the token if login is successful
+      if (data.access_token) {
+        setBrandToken(data.access_token);
+        console.log('✅ Token stored successfully');
+      }
+      
+      // Store brand data in cookies for dashboard access
+      if (data.brand) {
+        const brandDataCookie = `brand_data=${encodeURIComponent(JSON.stringify(data.brand))}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+        document.cookie = brandDataCookie;
+        console.log('✅ Brand data stored in cookies');
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('❌ API Error in brandLogin:', error);
       throw error;
     }
   }
@@ -374,6 +462,18 @@ class ApiService {
   async fetchSizes() {
     return this.request('/products/sizes');
   }
+
+
+
+
+
+
+
+
+
+
+
+
 
   // Product utility methods
   getProductPrice(product: any) {
