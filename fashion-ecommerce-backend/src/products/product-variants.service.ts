@@ -21,7 +21,7 @@ export class ProductVariantsService {
     
     const [variants, total] = await this.productVariantRepository.findAndCount({
       where,
-      relations: ['product', 'color', 'size'],
+      relations: ['product', 'product.brand', 'color', 'size'],
       skip,
       take: limit,
       order: { id: 'ASC' },
@@ -41,7 +41,7 @@ export class ProductVariantsService {
   async findOne(id: number) {
     const variant = await this.productVariantRepository.findOne({
       where: { id },
-      relations: ['product', 'color', 'size'],
+      relations: ['product', 'product.brand', 'color', 'size'],
     });
     if (!variant) {
       throw new NotFoundException(`Product variant with ID ${id} not found`);

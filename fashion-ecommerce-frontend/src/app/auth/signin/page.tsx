@@ -80,25 +80,45 @@ export default function SignInPage() {
         throw new Error(data.message || 'Login failed');
       }
 
-      // Store the token and user data in cookies
-      document.cookie = `token=${data.access_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-      document.cookie = `user=${JSON.stringify(data.user)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-
-      toast.success('Login successful! Welcome back to TAD.', {
-        duration: 3000, // Show for only 3 seconds
-        dismissible: true, // Allow manual dismissal
-        action: {
-          label: 'Dismiss',
-          onClick: () => toast.dismiss(),
-        },
-        position: 'top-center', // Position in center-top instead of top-right
+      // Clear any existing invalid cookies first
+      const cookiesToClear = ['user', 'token', 'auth', 'session', 'refresh'];
+      cookiesToClear.forEach(cookieName => {
+        document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+        document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=${window.location.hostname};`;
       });
 
-      // Redirect to homepage after successful login
-      router.push('/dashboard');
+      // Store the token and user data in cookies with proper validation
+      if (data.access_token && data.user && data.user.id && data.user.email) {
+        document.cookie = `token=${data.access_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+        document.cookie = `user=${JSON.stringify(data.user)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+        
+        toast.success('Login successful! Welcome back to TAD.', {
+          duration: 3000,
+          dismissible: true,
+          action: {
+            label: 'Dismiss',
+            onClick: () => toast.dismiss(),
+          },
+          position: 'top-center',
+        });
+
+        // Use window.location.href for more reliable redirect
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 500);
+      } else {
+        throw new Error('Invalid response data from server');
+      }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
       toast.error(errorMessage);
+      
+      // Clear any partial cookies on error
+      const cookiesToClear = ['user', 'token', 'auth', 'session', 'refresh'];
+      cookiesToClear.forEach(cookieName => {
+        document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+        document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=${window.location.hostname};`;
+      });
     } finally {
       setIsLoading(false);
     }

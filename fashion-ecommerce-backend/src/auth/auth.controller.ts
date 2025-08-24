@@ -47,7 +47,9 @@ export class AuthController {
     return this.authService.register(
       registerDto.email,
       registerDto.password,
-      registerDto.user_type,
+      registerDto.firstName,
+      registerDto.lastName,
+      registerDto.user_type || 'customer',
     );
   }
 
@@ -104,7 +106,12 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Super admin created successfully' })
   @ApiResponse({ status: 409, description: 'Super admin already exists' })
   async setupSuperAdmin(@Body() registerDto: RegisterDto) {
-    return this.authService.setupSuperAdmin(registerDto);
+    return this.authService.setupSuperAdmin({
+      email: registerDto.email,
+      password: registerDto.password,
+      firstName: registerDto.firstName,
+      lastName: registerDto.lastName,
+    });
   }
 
   @Post('admin/create')
@@ -115,7 +122,12 @@ export class AuthController {
   @ApiResponse({ status: 403, description: 'Only super admin can create admins' })
   @ApiResponse({ status: 409, description: 'Email already exists' })
   async createAdmin(@Body() registerDto: RegisterDto) {
-    return this.authService.createAdmin(registerDto);
+    return this.authService.createAdmin({
+      email: registerDto.email,
+      password: registerDto.password,
+      firstName: registerDto.firstName,
+      lastName: registerDto.lastName,
+    });
   }
 
   @Post('admin/create-brand')

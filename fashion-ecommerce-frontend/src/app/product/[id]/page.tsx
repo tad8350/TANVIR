@@ -21,10 +21,13 @@ import {
   X,
   Search,
   User,
-  Menu
+  Menu,
+  LogIn,
+  UserPlus
 } from "lucide-react";
 import { apiService } from "@/lib/api";
 import Image from 'next/image';
+import { toast, Toaster } from "sonner";
 
 // Cart and Wishlist Context
 interface CartItem {
@@ -180,11 +183,19 @@ export default function ProductDetails() {
   const [wishlistCount, setWishlistCount] = useState(0);
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [fullscreenImageIndex, setFullscreenImageIndex] = useState(0);
+  
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
     if (productId) {
       fetchProduct();
     }
+    
+    // Check authentication status
+    checkAuthenticationStatus();
     
     // Set initial counts
     const initialCartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
@@ -197,6 +208,36 @@ export default function ProductDetails() {
       // No subscriptions to unsubscribe from
     };
   }, [productId]);
+
+  // Check authentication status
+  const checkAuthenticationStatus = () => {
+    if (typeof window !== 'undefined') {
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const userData = getCookie('user');
+      if (userData) {
+        try {
+          let decodedUserData = userData;
+          if (userData.startsWith('%')) {
+            decodedUserData = decodeURIComponent(userData);
+          }
+          const user = JSON.parse(decodedUserData);
+          setUser(user);
+          setIsAuthenticated(true);
+        } catch (error) {
+          console.error('Error parsing user data:', error);
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+    }
+  };
 
     const fetchProduct = async () => {
       try {
@@ -363,6 +404,12 @@ export default function ProductDetails() {
   };
 
   const handleAddToCart = async () => {
+    // Check authentication first
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
+    
     if (!selectedColor || !selectedSize || !product) {
       console.log('Cannot add to cart - missing:', { selectedColor, selectedSize, product: !!product });
       return;
@@ -396,6 +443,7 @@ export default function ProductDetails() {
       window.dispatchEvent(new CustomEvent('cartUpdated'));
       
       // Show success feedback
+      toast.success(`Added ${quantity}x ${product.name} to cart!`);
       console.log(`Added ${quantity}x ${product.name} (${variant.color.name}, ${variant.size.name}) to cart`);
       console.log('New cart count:', newCartCount);
       
@@ -403,42 +451,70 @@ export default function ProductDetails() {
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (err) {
       console.error('Error adding to cart:', err);
+      toast.error('Failed to add to cart. Please try again.');
     } finally {
       setIsAddingToCart(false);
     }
   };
 
   const handleAddToWishlist = async () => {
-    if (!product) {
-      console.log('Cannot add to wishlist - no product');
+    // Check authentication first
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
       return;
     }
     
-    console.log('Adding to wishlist:', { product: product.name });
+    if (!product || !selectedColor || !selectedSize) {
+      console.log('Cannot add to wishlist - missing product, color, or size');
+      return;
+    }
+    
+    const variant = getSelectedVariant();
+    if (!variant) {
+      console.log('No variant found for selected color/size');
+      return;
+    }
+    
+    console.log('Adding to wishlist:', { product: product.name, variant });
     setIsAddingToWishlist(true);
     try {
-      // Add to wishlist and get new count
-      const newWishlistCount = addToWishlist({
-        productId: product.id,
-        name: product.name,
-        image: colorImages[0]?.url || '',
-        price: getCurrentPrice()
-      });
+      // Get user ID from cookies
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const userData = getCookie('user');
+      if (!userData) {
+        throw new Error('User not found');
+      }
+
+      let decodedUserData = userData;
+      if (userData.startsWith('%')) {
+        decodedUserData = decodeURIComponent(userData);
+      }
+      const user = JSON.parse(decodedUserData);
+      
+      // Add to favorites using API
+      await apiService.addToFavorites(user.id, variant.id);
       
       // Update the wishlist count in component state immediately
-      setWishlistCount(newWishlistCount);
+      setWishlistCount(prev => prev + 1);
       
       // Dispatch custom event to update header counts
       window.dispatchEvent(new CustomEvent('wishlistUpdated'));
       
       // Show success feedback
+      toast.success(`Added ${product.name} to wishlist!`);
       console.log(`Added ${product.name} to wishlist`);
-      console.log('New wishlist count:', newWishlistCount);
       
       // Simulate API call delay
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (err) {
       console.error('Error adding to wishlist:', err);
+      toast.error('Failed to add to wishlist. Please try again.');
     } finally {
       setIsAddingToWishlist(false);
     }
@@ -1073,6 +1149,63 @@ export default function ProductDetails() {
           )}
         </div>
       )}
+
+      {/* Authentication Modal */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-8">
+            <div className="text-center">
+              <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                <User className="h-10 w-10 text-white" />
+              </div>
+              
+              <h2 className="text-2xl font-bold text-gray-900 mb-3">Sign In Required</h2>
+              <p className="text-gray-600 mb-8">
+                Please sign in or create an account to add items to your cart and wishlist.
+              </p>
+              
+              <div className="space-y-4">
+                <button
+                  onClick={() => {
+                    setShowAuthModal(false);
+                    router.push('/auth/signin');
+                  }}
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2"
+                >
+                  <LogIn className="h-5 w-5" />
+                  <span>Sign In</span>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setShowAuthModal(false);
+                    router.push('/auth/signup');
+                  }}
+                  className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2"
+                >
+                  <UserPlus className="h-5 w-5" />
+                  <span>Create Account</span>
+                </button>
+                
+                <button
+                  onClick={() => setShowAuthModal(false)}
+                  className="w-full text-gray-500 hover:text-gray-700 font-medium py-2 transition-colors duration-200"
+                >
+                  Continue Shopping
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Toast Notifications */}
+      <Toaster 
+        position="top-right"
+        richColors
+        closeButton
+        duration={4000}
+      />
     </div>
   );
 }

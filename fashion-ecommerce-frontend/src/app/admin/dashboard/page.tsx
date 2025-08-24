@@ -106,7 +106,7 @@ export default function AdminDashboard() {
               <Home className="h-4 w-4" />
               <span className="font-medium">Dashboard</span>
             </a>
-            <a href="#" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
+            <a href="/admin/users" className="flex items-center space-x-2 px-3 py-2 rounded-lg text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors text-sm">
               <Users className="h-4 w-4" />
               <span>Users</span>
             </a>

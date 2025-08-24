@@ -9,13 +9,62 @@ import {
   MoreHorizontal, 
   X, 
   ArrowLeft,
-  Star
+  Star,
+  ArrowRight
 } from "lucide-react";
 import Image from 'next/image';
 import { useRouter } from "next/navigation";
 import Header from "@/components/layout/header";
 import { apiService } from "@/lib/api";
 
+// Interface for favorites API response
+interface FavoriteItem {
+  id: number;
+  user_id: number;
+  product_variant_id: number;
+  created_at: string;
+  product_variant: {
+    id: number;
+    product_id: number;
+    color_id: number;
+    size_id: number;
+    stock: number;
+    lowStockThreshold: number;
+    price: string;
+    discount_price: string;
+    sku: string;
+    is_active: boolean;
+    color: {
+      id: number;
+      name: string;
+      created_at: string;
+    };
+    size: {
+      id: number;
+      name: string;
+      created_at: string;
+    };
+    product: {
+      id: number;
+      name: string;
+      title: string;
+      description: string;
+      brand: {
+        id: number;
+        brand_name: string;
+        business_name: string;
+      };
+      images: Array<{
+        id: number;
+        product_id: number;
+        url: string;
+        cloudinary_public_id: string | null;
+      }>;
+    };
+  };
+}
+
+// Legacy interface for backward compatibility
 interface WishlistItem {
   productId: number;
   name: string;
@@ -75,7 +124,7 @@ interface FullProductData {
   categoryLevel3: string | null;
   categoryLevel4: string | null;
   created_at: string | null;
-  updated_at: string;
+  updated_at: string | null;
   variants?: Array<{
     id: number;
     product_id: number;
@@ -102,68 +151,128 @@ interface FullProductData {
 
 export default function WishlistPage() {
   const router = useRouter();
-  const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
+  const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [fullProductData, setFullProductData] = useState<{ [key: number]: FullProductData }>({});
   const [activeTab, setActiveTab] = useState('favourites');
   const [activeFilter, setActiveFilter] = useState('fashion');
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    // Load wishlist items from localStorage
+    // Load user data from cookies
     if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('wishlist');
-        if (stored) {
-          const items = JSON.parse(stored);
-          setWishlistItems(items);
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const userData = getCookie('user');
+      if (userData) {
+        try {
+          let decodedUserData = userData;
+          if (userData.startsWith('%')) {
+            decodedUserData = decodeURIComponent(userData);
+          }
+          const user = JSON.parse(decodedUserData);
+          setUser(user);
           
-          // Fetch full product data for each wishlist item
-          items.forEach((item: WishlistItem) => {
-            fetchFullProductData(item.productId);
-          });
+          // Fetch favorites for the authenticated user
+          if (user.id) {
+            fetchFavorites(user.id);
+          }
+        } catch (error) {
+          console.error('Error parsing user data:', error);
+          setIsLoading(false);
         }
-        setIsLoading(false);
-      } catch (error) {
-        console.error('Error loading wishlist:', error);
+      } else {
         setIsLoading(false);
       }
-    } else {
-      setIsLoading(false);
     }
   }, []);
 
-  const fetchFullProductData = async (productId: number) => {
+  const fetchFavorites = async (userId: number) => {
     try {
-      const response = await apiService.getProduct(productId);
-      if (response && response.data && typeof response.data === 'object' && 'id' in response.data) {
-        setFullProductData(prev => ({
-          ...prev,
-          [productId]: response.data as FullProductData
-        }));
+      const response = await apiService.getFavorites(userId, 1, 100);
+      console.log('Favorites API response:', response);
+      
+      if (response && response.data && Array.isArray(response.data)) {
+        console.log('Favorites data:', response.data);
+        setFavoriteItems(response.data);
+        
+        // Fetch additional product data for each favorite item
+        response.data.forEach((item: FavoriteItem) => {
+          console.log('Processing favorite item:', item);
+          fetchFullProductData(item.product_variant.product_id);
+        });
       }
+      setIsLoading(false);
     } catch (error) {
-      console.error('Error fetching product data:', error);
+      console.error('Error fetching favorites:', error);
+      setIsLoading(false);
     }
   };
 
-  const removeFromWishlist = (productId: number) => {
-    const newWishlist = wishlistItems.filter(item => item.productId !== productId);
-    setWishlistItems(newWishlist);
-    localStorage.setItem('wishlist', JSON.stringify(newWishlist));
-    
-    // Remove from full product data
-    setFullProductData(prev => {
-      const newData = { ...prev };
-      delete newData[productId];
-      return newData;
-    });
-    
-    // Dispatch custom event to update header counts
-    window.dispatchEvent(new CustomEvent('wishlistUpdated'));
+  const fetchFullProductData = async (productId: number) => {
+    try {
+      // Use product variants API to get brand information
+      const response = await apiService.getProductVariants(1, 100, productId);
+      if (response && response.data && Array.isArray(response.data) && response.data.length > 0) {
+        const variant = response.data[0] as any;
+        if (variant.product && variant.product.brand) {
+          const productData: FullProductData = {
+            id: variant.product.id,
+            name: variant.product.name || '',
+            title: variant.product.title || '',
+            description: variant.product.description || '',
+            price: variant.product.price,
+            salePrice: variant.product.salePrice,
+            costPrice: variant.product.costPrice,
+            brand: variant.product.brand,
+            status: variant.product.status || '',
+            images: [],
+            category: null,
+            category_id: variant.product.category_id || null,
+            categoryLevel1: variant.product.categoryLevel1,
+            categoryLevel2: variant.product.categoryLevel2,
+            categoryLevel3: variant.product.categoryLevel3,
+            categoryLevel4: variant.product.categoryLevel4,
+            created_at: variant.product.created_at,
+            updated_at: variant.product.updated_at,
+            variants: [variant]
+          };
+          
+          setFullProductData((prev: { [key: number]: FullProductData }) => ({
+            ...prev,
+            [productId]: productData
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching product variant data:', error);
+    }
   };
 
-  const addToCart = (item: WishlistItem) => {
-    // Add to cart logic here
+  const removeFromWishlist = async (favoriteId: number) => {
+    try {
+      await apiService.removeFromFavorites(favoriteId);
+      
+      // Remove from local state
+      const newFavorites = favoriteItems.filter(item => item.id !== favoriteId);
+      setFavoriteItems(newFavorites);
+      
+      // Dispatch custom event to update header counts
+      window.dispatchEvent(new CustomEvent('wishlistUpdated'));
+      
+      console.log('Removed from favorites successfully');
+    } catch (error) {
+      console.error('Error removing from favorites:', error);
+    }
+  };
+
+  const addToCart = (item: FavoriteItem) => {
+    // Add to cart logic here - you can implement this similar to the cart page
     console.log('Adding to cart:', item);
   };
 
@@ -197,11 +306,92 @@ export default function WishlistPage() {
   const getPrice = (productId: number) => {
     const fullData = fullProductData[productId];
     if (fullData && fullData.variants && fullData.variants.length > 0) {
-      const prices = fullData.variants.map(v => parseFloat(v.price || '0'));
-      return Math.min(...prices);
+      // Get the first variant with a valid price
+      const validVariant = fullData.variants.find(v => v.price && parseFloat(v.price) > 0);
+      if (validVariant) {
+        return parseFloat(validVariant.price);
+      }
+    }
+    // Fallback to product price if no variants
+    if (fullData && fullData.price) {
+      return parseFloat(fullData.price);
     }
     return 0; // Fallback
   };
+
+  // Helper function to get product image
+  const getProductImage = (productId: number) => {
+    // Get image from the favorites API response (which now includes images)
+    const wishlistItem = favoriteItems.find(item => item.product_variant.product_id === productId);
+    
+    // Debug logging
+    console.log('getProductImage called for productId:', productId);
+    console.log('Found wishlistItem:', wishlistItem);
+    
+    if (wishlistItem && wishlistItem.product_variant.product.images && wishlistItem.product_variant.product.images.length > 0) {
+      const imageUrl = wishlistItem.product_variant.product.images[0].url;
+      console.log('Using image from wishlistItem:', imageUrl);
+      
+      // Handle relative URLs by prefixing with backend URL
+      if (imageUrl && !imageUrl.startsWith('http')) {
+        const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+        const fullImageUrl = `${backendUrl}${imageUrl}`;
+        console.log('Converted relative URL to:', fullImageUrl);
+        return fullImageUrl;
+      }
+      
+      return imageUrl;
+    }
+    
+    console.log('No image found, using fallback');
+    // Fallback to default image
+    return '/images/products/default-product.jpg';
+  };
+
+  // Helper function to get product name
+  const getProductName = (productId: number) => {
+    const fullData = fullProductData[productId];
+    if (fullData && fullData.name) {
+      return fullData.name;
+    }
+    // Fallback to the original name from wishlist item if no API data
+    const wishlistItem = favoriteItems.find(item => item.product_variant.product_id === productId);
+    if (wishlistItem && wishlistItem.product_variant.product.name) {
+      return wishlistItem.product_variant.product.name;
+    }
+    return 'Product Name'; // Final fallback
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-black via-purple-900 to-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-amber-400 mx-auto"></div>
+          <p className="mt-6 text-amber-400 font-light text-lg">Loading your luxury wishlist...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if user is not authenticated
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-stone-50 via-neutral-50 to-zinc-50">
+        <Header />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
+          <Heart className="h-24 w-24 mx-auto mb-6 text-amber-400" />
+          <h1 className="text-3xl font-thin text-stone-800 mb-4">Sign in to view your wishlist</h1>
+          <p className="text-stone-600 mb-8 font-light text-lg">Please sign in to access your saved items</p>
+          <Button 
+            onClick={() => router.push('/auth/signin')} 
+            className="bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-black font-bold px-8 py-3"
+          >
+            Sign In
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-stone-50 via-neutral-50 to-zinc-50">
@@ -302,12 +492,7 @@ export default function WishlistPage() {
         </div>
 
         {/* Product Grid - UPDATED TO MATCH PRODUCT PAGE STYLE */}
-        {isLoading ? (
-          <div className="text-center py-24">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-amber-400 mx-auto mb-6"></div>
-            <p className="text-amber-400 font-light text-lg">Loading your luxury wishlist...</p>
-          </div>
-        ) : wishlistItems.length === 0 ? (
+        {favoriteItems.length === 0 ? (
           <div className="text-center py-24">
             <Heart className="h-24 w-24 mx-auto mb-6 text-amber-400" />
             <h2 className="text-3xl font-thin text-stone-800 mb-4">Your wishlist is empty</h2>
@@ -321,106 +506,119 @@ export default function WishlistPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {wishlistItems.map((item, index) => (
-              <div 
-                key={item.productId} 
-                className="group cursor-pointer bg-white/95 backdrop-blur-sm rounded-2xl overflow-hidden hover:bg-white hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border-2 border-purple-600 hover:border-purple-500 hover:shadow-purple-500/30"
-              >
-                {/* Product Image */}
-                <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-stone-50 to-neutral-50">
-                  <Image
-                    src={item.image}
-                    alt={item.name}
-                    fill
-                    className="object-cover group-hover:scale-110 transition-transform duration-500"
-                  />
-                  
-                  {/* Status Badge */}
-                  {getStatusBadge(item.status)}
-                  
-                  {/* Action Buttons */}
-                  <div className="absolute top-3 right-3 flex space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFromWishlist(item.productId);
-                      }}
-                    >
-                      <X className="h-4 w-4 text-stone-600" />
-                    </Button>
-                  </div>
-                  
-                  {/* Bottom Action Buttons */}
-                  <div className="absolute bottom-3 right-3 flex space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200 opacity-0 group-hover:opacity-100 transition-all duration-300"
-                    >
-                      <MoreHorizontal className="h-4 w-4 text-stone-600" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200 opacity-0 group-hover:opacity-100 transition-all duration-300"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        addToCart(item);
-                      }}
-                    >
-                      <ShoppingCart className="h-4 w-4 text-stone-600" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Product Info - MATCHING PRODUCT PAGE STYLE WITH CORRECT BRAND NAME */}
-                <div className="p-6">
-                  <div className="mb-3">
-                    <p className="text-xs font-medium text-stone-500 uppercase tracking-wide mb-1">
-                      {getBrandName(item.productId)}
-                    </p>
-                  </div>
-                  
-                  <h3 className="text-lg font-semibold text-stone-800 mb-3 line-clamp-2 group-hover:text-stone-900 transition-colors duration-200">
-                    {item.name}
-                  </h3>
-                  
-                  {/* Rating & Reviews */}
-                  <div className="flex items-center space-x-2 mb-4">
-                    <div className="flex items-center space-x-1">
-                      {[...Array(5)].map((_, i) => (
-                        <Star 
-                          key={i} 
-                          className={`h-3 w-3 ${i < 4 ? 'text-amber-400 fill-current' : 'text-stone-300'}`} 
-                        />
-                      ))}
+            {favoriteItems.map((item, index) => {
+              const productData = fullProductData[item.product_variant.product_id];
+              const displayImage = getProductImage(item.product_variant.product_id);
+              const displayName = getProductName(item.product_variant.product_id);
+              const displayBrand = getBrandName(item.product_variant.product_id);
+              const displayPrice = getPrice(item.product_variant.product_id);
+              
+              return (
+                <div 
+                  key={item.id} 
+                  className="group cursor-pointer bg-white/95 backdrop-blur-sm rounded-2xl overflow-hidden hover:bg-white hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border-2 border-purple-600 hover:border-purple-500 hover:shadow-purple-500/30"
+                  onClick={() => router.push(`/product/${item.product_variant.product_id}`)}
+                >
+                  {/* Product Image */}
+                  <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-stone-50 to-neutral-50">
+                    <Image
+                      src={displayImage}
+                      alt={displayName}
+                      fill
+                      className="object-cover group-hover:scale-110 transition-transform duration-500"
+                    />
+                    
+                    {/* Status Badge */}
+                    {getStatusBadge('available')}
+                    
+                    {/* Action Buttons */}
+                    <div className="absolute top-3 right-3 flex space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromWishlist(item.id);
+                        }}
+                      >
+                        <X className="h-4 w-4 text-stone-600" />
+                      </Button>
                     </div>
-                    <span className="text-xs text-stone-500 font-medium">
-                      (128)
-                    </span>
+                    
+                    {/* Bottom Action Buttons */}
+                    <div className="absolute bottom-3 right-3 flex space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200 opacity-0 group-hover:opacity-100 transition-all duration-300"
+                      >
+                        <MoreHorizontal className="h-4 w-4 text-stone-600" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 bg-white/95 hover:bg-white border border-stone-200 opacity-0 group-hover:opacity-100 transition-all duration-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToCart(item);
+                        }}
+                      >
+                        <ShoppingCart className="h-4 w-4 text-stone-600" />
+                      </Button>
+                    </div>
                   </div>
-                  
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-xl font-bold text-stone-800">
-                      ${getPrice(item.productId).toFixed(2)}
-                    </span>
-                    {item.size && (
-                      <span className="text-sm text-stone-500">Size: {item.size}</span>
-                    )}
-                  </div>
-                  
-                  {/* Additional Features */}
-                  <div className="text-center">
-                    <span className="inline-block px-3 py-1 bg-gradient-to-r from-stone-100 to-neutral-100 text-stone-700 text-xs font-medium rounded-full border border-stone-200">
-                      Free Shipping
-                    </span>
+
+                  {/* Product Info - MATCHING PRODUCT PAGE STYLE WITH CORRECT BRAND NAME */}
+                  <div className="p-6">
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-stone-500 uppercase tracking-wide mb-1">
+                        {displayBrand}
+                      </p>
+                    </div>
+                    
+                    <h3 className="text-lg font-semibold text-stone-800 mb-3 line-clamp-2 group-hover:text-stone-900 transition-colors duration-200 flex items-center">
+                      {displayName}
+                      <ArrowRight className="h-4 w-4 ml-2 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0" />
+                    </h3>
+                    <p className="text-xs text-purple-500 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      Click to view product details
+                    </p>
+                    
+                    {/* Rating & Reviews */}
+                    <div className="flex items-center space-x-2 mb-4">
+                      <div className="flex items-center space-x-1">
+                        {[...Array(5)].map((_, i) => (
+                          <Star 
+                            key={i} 
+                            className={`h-3 w-3 ${i < 4 ? 'text-amber-400 fill-current' : 'text-stone-300'}`} 
+                          />
+                        ))}
+                      </div>
+                      <span className="text-xs text-stone-500 font-medium">
+                        (128)
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xl font-bold text-stone-800">
+                        ${displayPrice.toFixed(2)}
+                      </span>
+                      {item.product_variant.size && (
+                        <span className="text-sm text-stone-500">Size: {item.product_variant.size.name}</span>
+                      )}
+                    </div>
+                    
+                    {/* Additional Features */}
+                    <div className="text-center">
+                      <span className="inline-block px-3 py-1 bg-gradient-to-r from-stone-100 to-neutral-100 text-stone-700 text-xs font-medium rounded-full border border-stone-200">
+                        Free Shipping
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

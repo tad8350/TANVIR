@@ -1058,6 +1058,8 @@ export default function AddProduct() {
       categoryLevel4: '',
       category: ''
     }));
+    // Clear all sizes when gender changes
+    clearAllSizes();
   };
 
   const handleCategoryLevel2Change = (value: string) => {
@@ -1068,6 +1070,8 @@ export default function AddProduct() {
       categoryLevel4: '',
       category: ''
     }));
+    // Clear all sizes when category type changes
+    clearAllSizes();
   };
 
   const handleCategoryLevel3Change = (value: string) => {
@@ -1141,7 +1145,121 @@ export default function AddProduct() {
     return true;
   };
 
+  // Function to get size chart based on selected category
+  const getSizeChartForCategory = () => {
+    if (!formData.categoryLevel1 || !formData.categoryLevel2) {
+      return [];
+    }
 
+    const gender = formData.categoryLevel1;
+    const categoryType = formData.categoryLevel2;
+    const subCategory = formData.categoryLevel3;
+
+    // MEN category size charts - Smart sizing
+    if (gender === 'men') {
+      if (categoryType === 'shoes') {
+        return ['39', '40', '41', '42', '43', '44', '45', '46', '47', '48'];
+      } else if (categoryType === 'clothing') {
+        // Smart sizing based on specific clothing type
+        if (subCategory === 'Business Shirts' || subCategory === 'Suits') {
+          return ['15', '15.5', '16', '16.5', '17', '17.5', '18', '18.5', '19', '19.5', '20', 'S', 'M', 'L', 'XL', 'XXL'];
+        } else if (subCategory === 'Panjabis') {
+          return ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        } else if (subCategory === 'Pants' || subCategory === 'Gabardines' || subCategory === 'Jeans' || subCategory === 'Trousers' || subCategory === 'Shorts') {
+          return ['28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        } else if (subCategory === 'Underwear') {
+          return ['28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        } else if (subCategory === 'Socks') {
+          return ['7', '8', '9', '10', '11', '12', '13', '14'];
+        } else if (subCategory === 'Pajamas') {
+          return ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        } else {
+          // Standard clothing (T-shirts, Polo Shirts, Hoodies, Sweatshirts, Jackets, Tracksuits)
+          return ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        }
+      } else if (categoryType === 'accessories') {
+        return ['One Size', 'S', 'M', 'L', 'XL'];
+      }
+    }
+
+    // WOMEN category size charts - Smart category-based sizing
+    if (gender === 'women') {
+      if (categoryType === 'shoes') {
+        return ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44'];
+      } else if (categoryType === 'clothing') {
+        // Smart sizing based on specific clothing type
+        if (subCategory === 'Salwar Kameez' || subCategory === 'Kurtis') {
+          return ['Free Size', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        } else if (subCategory === 'Sarees' || subCategory === 'Burkas' || subCategory === 'Abayas') {
+          return ['One Size', 'Free Size'];
+        } else if (subCategory === 'Undergarments') {
+          return ['32A', '32B', '34A', '34B', '36A', '36B', '38A', '38B', '40A', '40B'];
+        } else {
+          // Standard clothing (T-shirts, Shirts, Tops, Pants)
+          return ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+        }
+      } else if (categoryType === 'accessories') {
+        return ['One Size', 'S', 'M', 'L', 'XL'];
+      }
+    }
+
+    // KIDS category size charts - Age-based smart sizing
+    if (gender === 'kids') {
+      if (categoryType === 'shoes') {
+        // Age-based shoe sizing
+        if (subCategory === 'Baby (0-12 months)') {
+          return ['0-3M', '3-6M', '6-9M', '9-12M', '1', '2', '3', '4'];
+        } else if (subCategory === 'Toddler Girls (1-3 years)' || subCategory === 'Toddler Boys (1-3 years)') {
+          return ['4', '5', '6', '7', '8', '9', '10', '11', '12'];
+        } else if (subCategory === 'Kid Girls (3-6 years)' || subCategory === 'Kid Boys (3-6 years)') {
+          return ['12', '13', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13'];
+        } else if (subCategory === 'Teen Girls (9-16 years)' || subCategory === 'Teen Boys (9-16 years)') {
+          return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16'];
+        } else {
+          // Default shoe sizes for kids
+          return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13'];
+        }
+      } else if (categoryType === 'clothing') {
+        // Age-based clothing sizing
+        if (subCategory === 'Baby (0-12 months)') {
+          return ['0-3M', '3-6M', '6-9M', '9-12M', '12M', '18M', '24M'];
+        } else if (subCategory === 'Toddler Girls (1-3 years)' || subCategory === 'Toddler Boys (1-3 years)') {
+          return ['2T', '3T', '4T', '5T'];
+        } else if (subCategory === 'Kid Girls (3-6 years)' || subCategory === 'Kid Boys (3-6 years)') {
+          return ['3', '4', '5', '6', '7', '8'];
+        } else if (subCategory === 'Teen Girls (9-16 years)' || subCategory === 'Teen Boys (9-16 years)') {
+          return ['7', '8', '9', '10', '11', '12', '13', '14', '15', '16', 'XS', 'S', 'M', 'L', 'XL'];
+        } else {
+          // Default clothing sizes for kids
+          return ['2T', '3T', '4T', '5T', '3', '4', '5', '6', '7', '8', 'XS', 'S', 'M', 'L', 'XL'];
+        }
+      } else if (categoryType === 'accessories') {
+        return ['One Size', 'XS', 'S', 'M', 'L', 'XL'];
+      }
+    }
+
+    // Return empty array for other categories
+    return [];
+  };
+
+  // Function to clear all sizes when category changes
+  const clearAllSizes = () => {
+    setFormData(prev => ({
+      ...prev,
+      colorBlocks: prev.colorBlocks.map(block => ({
+        ...block,
+        sizes: block.sizes.map(size => ({
+          ...size,
+          size: '', // Clear selected size
+          quantity: '',
+          lowStockThreshold: '',
+          basePrice: '',
+          salePrice: '',
+          costPrice: ''
+        }))
+      }))
+    }));
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -1310,8 +1428,8 @@ export default function AddProduct() {
                     <div className="flex items-start space-x-2">
                       <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
                       <div className="text-sm text-blue-800">
-                        <p className="font-medium mb-1">New Pricing Structure</p>
-                        <p>Pricing is now handled per color variant. Each color can have its own base price, sale price, and cost price. This allows for more flexible pricing across different product variants.</p>
+                        <p className="font-medium mb-1">Dynamic Size Charts & New Pricing Structure</p>
+                        <p>Size charts automatically update based on your category selection. <strong>MEN:</strong> Shoes (39-48), Smart Clothing Sizing (Formal: Collar Sizes + S-XXL, Traditional: Chest Measurements + S-XXXL, Pants: Waist Measurements + S-XXXL, Undergarments: Waist + S-XXXL, Socks: Foot Sizes), Accessories (One Size + S-XL). <strong>WOMEN:</strong> Shoes (35-44), Smart Clothing Sizing (Traditional: Free Size + S-XL, Standard: XS-XXXL, Undergarments: Cup Sizes), Accessories (One Size + S-XL). <strong>KIDS:</strong> Age-Based Smart Sizing (Baby: Months + Sizes, Toddler: 2T-5T, Kids: 3-8, Teens: 7-16 + XS-XL), Shoes: Age-Appropriate US Sizing, Accessories: Standard Sizing. Pricing is handled per color variant with size-level pricing.</p>
                       </div>
                     </div>
                   </div>
@@ -1720,6 +1838,79 @@ export default function AddProduct() {
                         {/* Sizes + Stock + Pricing */}
                         <div>
                           <Label className="block mb-2 text-sm font-medium">Sizes + Stock + Pricing *</Label>
+                          
+                          {/* Category-based size chart info */}
+                          {getSizeChartForCategory().length > 0 ? (
+                            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                              <span className="font-medium">Available sizes for {formData.categoryLevel1} {formData.categoryLevel2}{formData.categoryLevel3 ? ` > ${formData.categoryLevel3}` : ''}:</span> {getSizeChartForCategory().join(', ')}
+                              {formData.categoryLevel1 === 'women' && formData.categoryLevel2 === 'clothing' && formData.categoryLevel3 && (
+                                <div className="mt-1 text-blue-600">
+                                  {formData.categoryLevel3 === 'Salwar Kameez' || formData.categoryLevel3 === 'Kurtis' ? 
+                                    'Traditional wear with Free Size + standard sizing' :
+                                    formData.categoryLevel3 === 'Sarees' || formData.categoryLevel3 === 'Burkas' || formData.categoryLevel3 === 'Abayas' ? 
+                                    'Loose-fitting garments with One Size/Free Size' :
+                                    formData.categoryLevel3 === 'Undergarments' ? 
+                                    'Bra sizing with cup and band measurements' :
+                                    'Standard clothing with XS-XXXL sizing'
+                                  }
+                                </div>
+                              )}
+                              
+                              {/* MEN clothing explanations */}
+                              {formData.categoryLevel1 === 'men' && formData.categoryLevel2 === 'clothing' && formData.categoryLevel3 && (
+                                <div className="mt-1 text-blue-600">
+                                  {formData.categoryLevel3 === 'Business Shirts' || formData.categoryLevel3 === 'Suits' ? 
+                                    'Formal wear with collar sizes + standard sizing' :
+                                    formData.categoryLevel3 === 'Panjabis' ? 
+                                    'Traditional wear with chest measurements + standard sizing' :
+                                    formData.categoryLevel3 === 'Pants' || formData.categoryLevel3 === 'Gabardines' || formData.categoryLevel3 === 'Jeans' || formData.categoryLevel3 === 'Trousers' || formData.categoryLevel3 === 'Shorts' ? 
+                                    'Pants with waist measurements + standard sizing' :
+                                    formData.categoryLevel3 === 'Underwear' ? 
+                                    'Undergarments with waist measurements + standard sizing' :
+                                    formData.categoryLevel3 === 'Socks' ? 
+                                    'Footwear with shoe size measurements' :
+                                    formData.categoryLevel3 === 'Pajamas' ? 
+                                    'Sleepwear with standard sizing' :
+                                    'Standard clothing with XS-XXXL sizing'
+                                  }
+                                </div>
+                              )}
+                              
+                              {/* KIDS explanations */}
+                              {formData.categoryLevel1 === 'kids' && formData.categoryLevel2 && formData.categoryLevel3 && (
+                                <div className="mt-1 text-blue-600">
+                                  {formData.categoryLevel2 === 'shoes' ? (
+                                    formData.categoryLevel3 === 'Baby (0-12 months)' ? 
+                                      'Baby shoes with age-based sizing (months + sizes)' :
+                                      formData.categoryLevel3 === 'Toddler Girls (1-3 years)' || formData.categoryLevel3 === 'Toddler Boys (1-3 years)' ? 
+                                      'Toddler shoes with US sizing (4-12)' :
+                                      formData.categoryLevel3 === 'Kid Girls (3-6 years)' || formData.categoryLevel3 === 'Kid Boys (3-6 years)' ? 
+                                      'Kid shoes with US sizing (1-13)' :
+                                      formData.categoryLevel3 === 'Teen Girls (9-16 years)' || formData.categoryLevel3 === 'Teen Boys (9-16 years)' ? 
+                                      'Teen shoes with US sizing (1-16)' :
+                                      'Kids shoes with age-appropriate sizing'
+                                  ) : formData.categoryLevel2 === 'clothing' ? (
+                                    formData.categoryLevel3 === 'Baby (0-12 months)' ? 
+                                      'Baby clothing with age-based sizing (months)' :
+                                      formData.categoryLevel3 === 'Toddler Girls (1-3 years)' || formData.categoryLevel3 === 'Toddler Boys (1-3 years)' ? 
+                                      'Toddler clothing with age-based sizing (2T-5T)' :
+                                      formData.categoryLevel3 === 'Kid Girls (3-6 years)' || formData.categoryLevel3 === 'Kid Boys (3-6 years)' ? 
+                                      'Kid clothing with age-based sizing (3-8)' :
+                                      formData.categoryLevel3 === 'Teen Girls (9-16 years)' || formData.categoryLevel3 === 'Teen Boys (9-16 years)' ? 
+                                      'Teen clothing with age-based sizing (7-16) + standard (XS-XL)' :
+                                      'Kids clothing with age-appropriate sizing'
+                                  ) : formData.categoryLevel2 === 'accessories' ? 
+                                      'Kids accessories with standard sizing' :
+                                      'Kids products with age-appropriate sizing'
+                                  }
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                              <span className="font-medium">Please select a category first to see available sizes</span>
+                            </div>
+                          )}
                           <div className="space-y-3">
                             {/* Header row for size fields */}
                             <div className="grid grid-cols-7 gap-2 text-xs font-medium text-gray-600 mb-2">
@@ -1738,29 +1929,27 @@ export default function AddProduct() {
                                   <Select 
                                     value={size.size} 
                                     onValueChange={(value) => updateSizeInColorBlock(colorBlock.id, size.id, 'size', value)}
+                                    disabled={getSizeChartForCategory().length === 0}
                                   >
                                     <SelectTrigger className="h-10 w-full">
-                                      <SelectValue placeholder="Select size" />
+                                      <SelectValue placeholder={
+                                        getSizeChartForCategory().length === 0 
+                                          ? "Select category first" 
+                                          : "Select size"
+                                      } />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="xs">XS</SelectItem>
-                                      <SelectItem value="s">S</SelectItem>
-                                      <SelectItem value="m">M</SelectItem>
-                                      <SelectItem value="l">L</SelectItem>
-                                      <SelectItem value="xl">XL</SelectItem>
-                                      <SelectItem value="xxl">XXL</SelectItem>
-                                      <SelectItem value="xxxl">XXXL</SelectItem>
-                                      <SelectItem value="2t">2T</SelectItem>
-                                      <SelectItem value="3t">3T</SelectItem>
-                                      <SelectItem value="4t">4T</SelectItem>
-                                      <SelectItem value="5t">5T</SelectItem>
-                                      <SelectItem value="6t">6T</SelectItem>
-                                      <SelectItem value="7">7</SelectItem>
-                                      <SelectItem value="8">8</SelectItem>
-                                      <SelectItem value="9">9</SelectItem>
-                                      <SelectItem value="10">10</SelectItem>
-                                      <SelectItem value="11">11</SelectItem>
-                                      <SelectItem value="12">12</SelectItem>
+                                      {getSizeChartForCategory().length > 0 ? (
+                                        getSizeChartForCategory().map((sizeOption) => (
+                                          <SelectItem key={sizeOption} value={sizeOption}>
+                                            {sizeOption}
+                                          </SelectItem>
+                                        ))
+                                      ) : (
+                                        <div className="px-2 py-1 text-sm text-gray-500">
+                                          Please select a category first
+                                        </div>
+                                      )}
                                     </SelectContent>
                                   </Select>
                                 </div>

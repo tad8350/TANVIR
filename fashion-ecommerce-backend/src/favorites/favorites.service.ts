@@ -16,7 +16,7 @@ export class FavoritesService {
     
     const [favorites, total] = await this.favoriteRepository.findAndCount({
       where: { user_id: userId },
-      relations: ['product_variant', 'product_variant.product'],
+      relations: ['product_variant', 'product_variant.product', 'product_variant.product.brand', 'product_variant.product.images'],
       skip,
       take: limit,
       order: { created_at: 'DESC' },

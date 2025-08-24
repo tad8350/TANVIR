@@ -24,6 +24,14 @@ export class UsersController {
     return this.usersService.findAll(page, limit, search);
   }
 
+  @Get('all-users')
+  @ApiOperation({ summary: 'Get all users from all sources (comprehensive)' })
+  @ApiQuery({ name: 'search', required: false, description: 'Search term', example: 'john' })
+  @ApiResponse({ status: 200, description: 'Comprehensive list of all users', type: [UserResponseDto] })
+  async getAllUsers(@Query('search') search?: string) {
+    return this.usersService.getAllUsers(search);
+  }
+
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'User profile', type: UserResponseDto })

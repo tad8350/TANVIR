@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call the backend API
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/auth/login`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

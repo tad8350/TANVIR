@@ -172,6 +172,38 @@ class ApiService {
     }
   }
 
+  // Public request method for endpoints that don't require authentication
+  private async publicRequest<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<ApiResponse<T>> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...options.headers as Record<string, string>,
+    };
+
+    const config: RequestInit = {
+      headers,
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'API request failed');
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Public API Error:', error);
+      throw error;
+    }
+  }
+
   // Auth endpoints
   async adminLogin(email: string, password: string): Promise<AdminLoginResponse> {
     const url = `${API_BASE_URL}/auth/admin/login`;
@@ -303,6 +335,11 @@ class ApiService {
 
   async getProduct(id: number) {
     return this.request(`/products/${id}`);
+  }
+
+  // Public method for getting products without authentication
+  async getPublicProduct(id: number) {
+    return this.publicRequest(`/products/${id}`);
   }
 
   async updateProduct(id: number, productData: Partial<ProductFormData>) {
@@ -501,6 +538,46 @@ class ApiService {
       return product.images[0];
     }
     return '/images/placeholder-product.jpg';
+  }
+
+  async getProductVariants(page: number = 1, limit: number = 10, productId?: number) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    
+    if (productId) {
+      params.append('product_id', productId.toString());
+    }
+    
+    return this.request(`/product-variants?${params}`);
+  }
+
+  // Favorites endpoints
+  async getFavorites(userId: number, page: number = 1, limit: number = 10) {
+    const params = new URLSearchParams({
+      user_id: userId.toString(),
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    
+    return this.request(`/favorites?${params}`);
+  }
+
+  async addToFavorites(userId: number, productVariantId: number) {
+    return this.request('/favorites', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: userId,
+        product_variant_id: productVariantId,
+      }),
+    });
+  }
+
+  async removeFromFavorites(favoriteId: number) {
+    return this.request(`/favorites/${favoriteId}`, {
+      method: 'DELETE',
+    });
   }
 
   getProductVariantsWithDetails(product: any) {

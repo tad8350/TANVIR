@@ -3,11 +3,20 @@
 import { Search, ShoppingCart, User, Heart, LogOut, Settings, UserCheck, Package, HelpCircle, LogIn, UserPlus, Menu, X, Diamond, Crown, Gem } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
-export default function DashboardHeader() {
+interface DashboardHeaderProps {
+  isAuthenticated?: boolean;
+  user?: any;
+  cartCount?: number;
+  wishlistCount?: number;
+  onSignOut?: () => void;
+}
+
+export default function DashboardHeader({ isAuthenticated = false, user, cartCount = 0, wishlistCount = 0, onSignOut }: DashboardHeaderProps) {
+  const router = useRouter();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -32,6 +41,40 @@ export default function DashboardHeader() {
     setShowMobileMenu(!showMobileMenu);
   };
 
+  const handleSignOut = () => {
+    // Clear all authentication-related cookies
+    const cookies = ['user', 'token', 'auth', 'session', 'refresh'];
+    cookies.forEach(cookieName => {
+      document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+      document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname};`;
+    });
+    
+    // Clear localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('auth');
+      localStorage.removeItem('cart');
+      localStorage.removeItem('wishlist');
+    }
+    
+    // Call parent callback to update state
+    if (onSignOut) {
+      onSignOut();
+    }
+    
+    // Close menu
+    setShowProfileMenu(false);
+    
+    // Show success message
+    console.log('Signout successful');
+  };
+
+  const handleNavigation = (path: string) => {
+    router.push(path);
+    setShowProfileMenu(false);
+  };
+
   return (
     <>
       {/* Top Bar - LIGHT THEME WITH PURPLE */}
@@ -50,7 +93,7 @@ export default function DashboardHeader() {
           <div className="flex items-center space-x-8">
             <span className="hidden sm:inline font-semibold">Elite Support</span>
             <span className="hidden sm:inline text-white/80">|</span>
-            <span className="font-semibold">Track Order</span>
+            <span className="font-semibold cursor-pointer hover:text-purple-200 transition-colors duration-200">Track Order</span>
           </div>
         </div>
       </div>
@@ -59,24 +102,22 @@ export default function DashboardHeader() {
       <header className="bg-white shadow-lg border-b border-purple-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
-            {/* Logo */}
-            <div className="flex items-center space-x-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 via-indigo-500 to-blue-500 rounded-xl flex items-center justify-center shadow-xl shadow-purple-500/25">
-                <span className="text-white font-bold text-3xl">T</span>
+            {/* Logo - Clean Luxury Design */}
+            <div className="flex items-center space-x-8 flex-1 justify-center">
+              {/* Premium Logo Icon */}
+              <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center shadow-lg cursor-pointer" onClick={() => router.push('/dashboard')}>
+                <span className="text-white font-bold text-2xl">T</span>
               </div>
-              <div className="text-4xl font-thin bg-gradient-to-r from-purple-500 via-indigo-500 to-blue-500 bg-clip-text text-transparent">
-                TAD
-              </div>
-            </div>
-            
-            {/* Search Bar - Light Design */}
-            <div className="flex-1 max-w-2xl mx-16 hidden lg:block">
-              <div className="relative">
-                <Input 
-                  placeholder="Search luxury collections..."
-                  className="bg-purple-50 text-purple-900 rounded-none border-purple-300 focus:border-purple-500 focus:ring-purple-500 py-4 px-6 font-light placeholder-purple-600"
-                />
-                <Search className="absolute right-6 top-1/2 transform -translate-y-1/2 text-purple-500 h-5 w-5" />
+              
+              {/* Brand Text */}
+              <div className="flex items-center space-x-4 cursor-pointer" onClick={() => router.push('/dashboard')}>
+                <div className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                  TAD
+                </div>
+                <div className="text-gray-400 text-2xl">•</div>
+                <div className="text-4xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+                  The Apparel District
+                </div>
               </div>
             </div>
             
@@ -92,7 +133,7 @@ export default function DashboardHeader() {
                 {showProfileMenu && (
                   <div className="absolute top-full right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-purple-200 z-50">
                     <div className="py-3">
-                      {isLoggedIn ? (
+                      {isAuthenticated ? (
                         // Logged in user menu
                         <>
                           <div className="px-8 py-6 border-b border-purple-200">
@@ -108,32 +149,37 @@ export default function DashboardHeader() {
                           </div>
                           
                           <div className="py-3">
-                            <a href="#" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/dashboard')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <UserCheck className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">My Profile</span>
-                            </a>
+                            </button>
                             
-                            <a href="#" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/orders')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <Package className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">My Orders</span>
-                            </a>
+                            </button>
                             
-                            <a href="#" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/wishlist')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <Heart className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">Wishlist</span>
-                            </a>
+                            </button>
                             
-                            <a href="#" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/cart')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                              <ShoppingCart className="h-5 w-5 mr-4 text-purple-500" />
+                              <span className="text-sm font-medium">Shopping Cart</span>
+                            </button>
+                            
+                            <button onClick={() => handleNavigation('/settings')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <Settings className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">Settings</span>
-                            </a>
+                            </button>
                           </div>
                           
                           <div className="border-t border-purple-200 pt-3">
-                            <a href="#" className="flex items-center px-8 py-4 text-red-600 hover:bg-red-50 transition-colors duration-200">
+                            <button onClick={handleSignOut} className="w-full text-left flex items-center px-8 py-4 text-red-600 hover:bg-red-50 transition-colors duration-200">
                               <LogOut className="h-5 w-5 mr-4" />
                               <span className="text-sm font-medium">Sign Out</span>
-                            </a>
+                            </button>
                           </div>
                         </>
                       ) : (
@@ -152,22 +198,22 @@ export default function DashboardHeader() {
                           </div>
                           
                           <div className="py-3">
-                            <a href="/auth/signin" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/auth/signin')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <LogIn className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">Sign In</span>
-                            </a>
+                            </button>
                             
-                            <a href="/auth/signup" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/auth/signup')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <UserPlus className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">Create Account</span>
-                            </a>
+                            </button>
                           </div>
                           
                           <div className="border-t border-purple-200 pt-3">
-                            <a href="#" className="flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
+                            <button onClick={() => handleNavigation('/wishlist')} className="w-full text-left flex items-center px-8 py-4 text-purple-700 hover:bg-purple-50 transition-colors duration-200 hover:text-purple-900">
                               <Heart className="h-5 w-5 mr-4 text-purple-500" />
                               <span className="text-sm font-medium">Wishlist</span>
-                            </a>
+                            </button>
                           </div>
                         </>
                       )}
@@ -175,8 +221,24 @@ export default function DashboardHeader() {
                   </div>
                 )}
               </div>
-              <ShoppingCart className="h-7 w-7 cursor-pointer hover:text-purple-600 text-purple-700 transition-colors duration-200" />
-              <Heart className="h-7 w-7 cursor-pointer hover:text-purple-600 text-purple-700 transition-colors duration-200" />
+              
+              <button onClick={() => handleNavigation('/cart')} className="relative">
+                <ShoppingCart className="h-7 w-7 cursor-pointer hover:text-purple-600 text-purple-700 transition-colors duration-200" />
+                {isAuthenticated && cartCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
+                    {cartCount}
+                  </span>
+                )}
+              </button>
+              
+              <button onClick={() => handleNavigation('/wishlist')} className="relative">
+                <Heart className="h-7 w-7 cursor-pointer hover:text-purple-600 text-purple-700 transition-colors duration-200" />
+                {isAuthenticated && wishlistCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
+                    {wishlistCount}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -10,7 +10,8 @@ import {
   Plus,
   Heart,
   ShoppingCart,
-  Star
+  Star,
+  ArrowRight
 } from "lucide-react";
 import Image from 'next/image';
 import { useRouter } from "next/navigation";
@@ -101,6 +102,24 @@ interface FullProductData {
       name: string;
       created_at: string;
     };
+    product: {
+      id: number;
+      name: string;
+      title: string;
+      description: string;
+      price: string;
+      salePrice: string;
+      costPrice: string;
+      brand: string;
+      status: string;
+      category_id: number;
+      categoryLevel1: string;
+      categoryLevel2: string;
+      categoryLevel3: string;
+      categoryLevel4: string;
+      created_at: string;
+      updated_at: string;
+    };
   }>;
 }
 
@@ -137,15 +156,55 @@ export default function CartPage() {
 
   const fetchFullProductData = async (productId: number) => {
     try {
-      const response = await apiService.getProduct(productId);
-      if (response && response.data && (response.data as any).id) {
-        setFullProductData(prev => ({
-          ...prev,
-          [productId]: response.data as FullProductData
-        }));
+      // Instead of fetching full product data, fetch product variants which now include brand info
+      const response = await apiService.getProductVariants(1, 100, productId);
+      if (response && response.data && Array.isArray(response.data) && response.data.length > 0) {
+        // Get the first variant to extract product and brand info
+        const variant = response.data[0] as any;
+        if (variant.product && variant.product.brand) {
+          // Create a simplified product data structure with brand info
+          const productData: FullProductData = {
+            id: variant.product.id,
+            name: variant.product.name || '',
+            title: variant.product.title || '',
+            description: variant.product.description || '',
+            price: variant.product.price,
+            salePrice: variant.product.salePrice,
+            costPrice: variant.product.costPrice,
+            brand: variant.product.brand,
+            status: variant.product.status || '',
+            images: [],
+            category: null,
+            category_id: variant.product.category_id || null,
+            categoryLevel1: variant.product.categoryLevel1,
+            categoryLevel2: variant.product.categoryLevel2,
+            categoryLevel3: variant.product.categoryLevel3,
+            categoryLevel4: variant.product.categoryLevel4,
+            created_at: variant.product.created_at,
+            updated_at: variant.product.updated_at,
+            variants: [variant]
+          };
+          
+          setFullProductData((prev: { [key: number]: FullProductData }) => ({
+            ...prev,
+            [productId]: productData
+          }));
+        }
       }
     } catch (error) {
-      console.error('Error fetching product data:', error);
+      console.error('Error fetching product variant data:', error);
+      // Fallback to old method if variant API fails
+      try {
+        const response = await apiService.getProduct(productId);
+        if (response && response.data && (response.data as any).id) {
+          setFullProductData((prev: { [key: number]: FullProductData }) => ({
+            ...prev,
+            [productId]: response.data as FullProductData
+          }));
+        }
+      } catch (fallbackError) {
+        console.error('Fallback product fetch also failed:', fallbackError);
+      }
     }
   };
 
@@ -155,7 +214,7 @@ export default function CartPage() {
       return;
     }
     
-    const newCart = cartItems.map(item => 
+    const newCart = cartItems.map((item: CartItem) => 
       item.variantId === variantId ? { ...item, quantity: newQuantity } : item
     );
     setCartItems(newCart);
@@ -166,15 +225,15 @@ export default function CartPage() {
   };
 
   const removeFromCart = (variantId: number) => {
-    const newCart = cartItems.filter(item => item.variantId !== variantId);
+    const newCart = cartItems.filter((item: CartItem) => item.variantId !== variantId);
     setCartItems(newCart);
     localStorage.setItem('cart', JSON.stringify(newCart));
     
     // Remove from full product data
-    setFullProductData(prev => {
+    setFullProductData((prev: { [key: number]: FullProductData }) => {
       const newData = { ...prev };
       // Find the product ID for this variant and remove it
-      const itemToRemove = cartItems.find(item => item.variantId === variantId);
+      const itemToRemove = cartItems.find((item: CartItem) => item.variantId === variantId);
       if (itemToRemove) {
         delete newData[itemToRemove.productId];
       }
@@ -305,7 +364,11 @@ export default function CartPage() {
               {/* Cart Items */}
               <div className="space-y-6">
                 {cartItems.map((item) => (
-                  <div key={item.variantId} className="bg-white/95 backdrop-blur-sm border-2 border-purple-600 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <div 
+                    key={item.variantId} 
+                    className="group bg-white/95 backdrop-blur-sm border-2 border-purple-600 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer hover:shadow-2xl hover:border-purple-500 hover:scale-[1.02]"
+                    onClick={() => router.push(`/product/${item.productId}`)}
+                  >
                     <div className="flex space-x-6">
                       {/* Product Image */}
                       <div className="w-28 h-28 flex-shrink-0">
@@ -327,9 +390,13 @@ export default function CartPage() {
                                 {getBrandName(item.productId)}
                               </p>
                             </div>
-                            <h3 className="text-lg font-semibold text-stone-800 mb-3">
+                            <h3 className="text-lg font-semibold text-stone-800 mb-3 hover:text-purple-600 transition-colors duration-200 flex items-center">
                               {item.name}
+                              <ArrowRight className="h-4 w-4 ml-2 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                             </h3>
+                            <p className="text-xs text-purple-500 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              Click to view product details
+                            </p>
                             <div className="text-sm text-stone-600 space-y-1">
                               <p>Colour: {item.color}</p>
                               <p>Size: {item.size}</p>
@@ -372,7 +439,10 @@ export default function CartPage() {
                               variant="outline"
                               size="sm"
                               className="w-8 h-8 p-0 border-stone-300 text-stone-600 hover:bg-stone-50 hover:border-amber-400"
-                              onClick={() => updateCartItemQuantity(item.variantId, item.quantity - 1)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateCartItemQuantity(item.variantId, item.quantity - 1);
+                              }}
                             >
                               <Minus className="h-3 w-3" />
                             </Button>
@@ -383,7 +453,10 @@ export default function CartPage() {
                               variant="outline"
                               size="sm"
                               className="w-8 h-8 p-0 border-stone-300 text-stone-600 hover:bg-stone-50 hover:border-amber-400"
-                              onClick={() => updateCartItemQuantity(item.variantId, item.quantity + 1)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateCartItemQuantity(item.variantId, item.quantity + 1);
+                              }}
                             >
                               <Plus className="h-3 w-3" />
                             </Button>
@@ -394,7 +467,10 @@ export default function CartPage() {
                               variant="ghost"
                               size="sm"
                               className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => removeFromCart(item.variantId)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeFromCart(item.variantId);
+                              }}
                             >
                               <X className="h-4 w-4" />
                             </Button>
@@ -402,7 +478,10 @@ export default function CartPage() {
                               variant="ghost"
                               size="sm"
                               className="text-stone-500 hover:text-stone-700 hover:bg-stone-50"
-                              onClick={() => addToWishlist(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addToWishlist(item);
+                              }}
                             >
                               <Heart className="h-4 w-4" />
                             </Button>

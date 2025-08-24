@@ -8,7 +8,7 @@ import {
   TrendingUp, Sparkles, Search, Filter, Grid3X3, List, 
   Clock, Award, Users, ShoppingBag, Eye, ThumbsUp, 
   Shield, Truck, RefreshCw, Crown, ArrowUpRight, Play,
-  Diamond, Gem, Zap, Star as StarIcon
+  Diamond, Gem, Zap, Star as StarIcon, User
 } from "lucide-react";
 import DashboardHeader from "@/components/layout/dashboard-header";
 import DashboardFooter from "@/components/layout/dashboard-footer";
@@ -103,6 +103,12 @@ export default function Dashboard() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  
+  // Add cart and wishlist count state
+  const [cartCount, setCartCount] = useState(0);
+  const [wishlistCount, setWishlistCount] = useState(0);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
   // Luxury brand data
   const luxuryBrands = [
@@ -160,6 +166,164 @@ export default function Dashboard() {
 
     fetchData();
   }, []);
+
+  // Add useEffect for authentication and cart/wishlist counts
+  useEffect(() => {
+    // Load user data from cookies
+    if (typeof window !== 'undefined') {
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const userData = getCookie('user');
+      const tokenData = getCookie('token');
+      
+      console.log('Auth check - User cookie:', userData ? 'exists' : 'missing');
+      console.log('Auth check - Token cookie:', tokenData ? 'exists' : 'missing');
+      
+      if (userData && tokenData) {
+        try {
+          let decodedUserData = userData;
+          if (userData.startsWith('%')) {
+            decodedUserData = decodeURIComponent(userData);
+          }
+          const user = JSON.parse(decodedUserData);
+          
+          console.log('Parsed user data:', user);
+          
+          // Validate user data structure
+          if (user && typeof user === 'object' && user.id && user.email) {
+            setUser(user);
+            setIsAuthenticated(true);
+            console.log('Authentication successful:', user.id);
+          } else {
+            console.warn('Invalid user data structure');
+            setIsAuthenticated(false);
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('Error parsing user data:', error);
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        console.log('No authentication cookies found');
+      }
+
+      // Load counts from localStorage
+      try {
+        const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
+        const wishlistItems = JSON.parse(localStorage.getItem('wishlist') || '[]');
+        
+        setCartCount(cartItems.reduce((total: number, item: any) => total + item.quantity, 0));
+        setWishlistCount(wishlistItems.length);
+      } catch (error) {
+        console.error('Error loading counts:', error);
+      }
+    }
+  }, []);
+
+  // Remove the complex periodic authentication check that was causing issues
+  // The middleware will handle authentication validation
+
+  // Function to manually refresh authentication status
+  const refreshAuthStatus = () => {
+    if (typeof window !== 'undefined') {
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const userData = getCookie('user');
+      const tokenData = getCookie('token');
+      
+      if (userData && tokenData) {
+        try {
+          let decodedUserData = userData;
+          if (userData.startsWith('%')) {
+            decodedUserData = decodeURIComponent(userData);
+          }
+          const user = JSON.parse(decodedUserData);
+          
+          if (user && typeof user === 'object' && user.id && user.email) {
+            setUser(user);
+            setIsAuthenticated(true);
+            console.log('Authentication refreshed successfully:', user);
+          } else {
+            setIsAuthenticated(false);
+            console.log('Invalid user data structure');
+          }
+        } catch (error) {
+          console.error('Error parsing user data:', error);
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+        console.log('No authentication cookies found');
+      }
+    }
+  };
+
+  // Listen for storage changes to update counts in real-time
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
+        const wishlistItems = JSON.parse(localStorage.getItem('wishlist') || '[]');
+        
+        setCartCount(cartItems.reduce((total: number, item: any) => total + item.quantity, 0));
+        setWishlistCount(wishlistItems.length);
+      } catch (error) {
+        console.error('Error updating counts:', error);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    // Also listen for custom events for same-tab updates
+    window.addEventListener('cartUpdated', handleStorageChange);
+    window.addEventListener('wishlistUpdated', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('cartUpdated', handleStorageChange);
+      window.removeEventListener('wishlistUpdated', handleStorageChange);
+    };
+  }, []);
+
+  // Handle sign out
+  const handleSignOut = () => {
+    // Clear all authentication-related cookies
+    const cookies = ['user', 'token', 'auth', 'session', 'refresh'];
+    cookies.forEach(cookieName => {
+      document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+      document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=${window.location.hostname};`;
+    });
+    
+    // Clear localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('auth');
+      localStorage.removeItem('cart');
+      localStorage.removeItem('wishlist');
+    }
+    
+    // Update state
+    setIsAuthenticated(false);
+    setUser(null);
+    setCartCount(0);
+    setWishlistCount(0);
+    
+    // Redirect to home
+    router.push('/');
+  };
 
   // Search function
   const handleSearch = async (query: string) => {
@@ -387,7 +551,13 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-black">
-        <DashboardHeader />
+        <DashboardHeader 
+          isAuthenticated={isAuthenticated}
+          user={user}
+          cartCount={cartCount}
+          wishlistCount={wishlistCount}
+          onSignOut={handleSignOut}
+        />
         <div className="flex items-center justify-center min-h-[48vh]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-400 mx-auto"></div>
@@ -402,7 +572,13 @@ export default function Dashboard() {
   if (error) {
     return (
       <div className="min-h-screen bg-black">
-        <DashboardHeader />
+        <DashboardHeader 
+          isAuthenticated={isAuthenticated}
+          user={user}
+          cartCount={cartCount}
+          wishlistCount={wishlistCount}
+          onSignOut={handleSignOut}
+        />
         <div className="flex items-center justify-center min-h-[48vh]">
           <div className="text-center">
             <div className="text-amber-400 text-xl mb-5">💎</div>
@@ -419,7 +595,97 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      <DashboardHeader />
+      <DashboardHeader 
+        isAuthenticated={isAuthenticated}
+        user={user}
+        cartCount={cartCount}
+        wishlistCount={wishlistCount}
+        onSignOut={handleSignOut}
+      />
+
+      {/* Simple Authentication Status - Only show when not authenticated */}
+      {!isAuthenticated && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-400 p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-amber-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm text-amber-700">
+                <strong>Welcome to TAD!</strong> You can browse our luxury collection. 
+                <button 
+                  onClick={() => window.location.href = '/auth/signin'} 
+                  className="ml-2 underline hover:no-underline font-medium"
+                >
+                  Sign in
+                </button>
+                to see your cart and wishlist counts.
+              </p>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={refreshAuthStatus}
+                className="text-xs text-amber-600 hover:text-amber-800 underline"
+              >
+                Refresh
+              </button>
+              <button 
+                onClick={() => {
+                  console.log('=== AUTH DEBUG INFO ===');
+                  console.log('Current auth state:', { isAuthenticated, user });
+                  console.log('All cookies:', document.cookie);
+                  
+                  // Check specific cookies
+                  const getCookie = (name: string) => {
+                    const value = `; ${document.cookie}`;
+                    const parts = value.split(`; ${name}=`);
+                    if (parts.length === 2) return parts.pop()?.split(';').shift();
+                    return null;
+                  };
+                  
+                  const token = getCookie('token');
+                  const userCookie = getCookie('user');
+                  console.log('Token cookie:', token ? 'exists' : 'missing');
+                  console.log('User cookie:', userCookie ? 'exists' : 'missing');
+                  
+                  if (userCookie) {
+                    try {
+                      const parsedUser = JSON.parse(userCookie);
+                      console.log('Parsed user data:', parsedUser);
+                    } catch (e) {
+                      console.log('Failed to parse user cookie:', e);
+                    }
+                  }
+                  console.log('======================');
+                }}
+                className="text-xs text-blue-600 hover:text-blue-800 underline"
+              >
+                Debug
+              </button>
+              <button 
+                onClick={() => {
+                  // Test manual navigation to signin
+                  console.log('Testing manual navigation to signin...');
+                  window.location.href = '/auth/signin';
+                }}
+                className="text-xs text-green-600 hover:text-green-800 underline"
+              >
+                Test Signin
+              </button>
+              <button 
+                onClick={() => {
+                  // Test if we can navigate to other pages
+                  console.log('Testing navigation to home...');
+                  window.location.href = '/';
+                }}
+                className="text-xs text-purple-600 hover:text-purple-800 underline"
+              >
+                Test Home
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero Section - REDUCED BY 20% */}
       <section className="relative bg-gradient-to-br from-black via-purple-900 to-black text-white py-24 overflow-hidden">
@@ -448,6 +714,17 @@ export default function Dashboard() {
               Where <span className="text-amber-400 font-medium">luxury</span> meets <span className="text-purple-400 font-medium">innovation</span>. 
               Discover our curated collection of <span className="text-pink-400 font-medium">exclusive</span> fashion, 
               crafted with <span className="text-emerald-400 font-medium">uncompromising</span> quality.
+              {!isAuthenticated && (
+                <span className="block mt-4 text-lg text-amber-200">
+                  <button 
+                    onClick={() => window.location.href = '/auth/signin'} 
+                    className="underline hover:no-underline font-medium"
+                  >
+                    Sign in
+                  </button>
+                  {' '}to unlock personalized features and track your favorites.
+                </span>
+              )}
             </p>
             
             {/* Search Bar - IMPLEMENTED */}
@@ -516,14 +793,26 @@ export default function Dashboard() {
                 <ShoppingCart className="mr-2 h-6 w-6" />
                 Explore Collection
               </Button>
-              <Button 
-                size="lg" 
-                variant="outline" 
-                className="border-2 border-amber-400 text-amber-400 hover:bg-amber-400 hover:text-black py-5 px-10 rounded-none transition-all duration-300 transform hover:scale-110 font-bold"
-              >
-                <TrendingUp className="mr-2 h-6 w-6" />
-                View Trends
-              </Button>
+              {!isAuthenticated ? (
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  className="border-2 border-amber-400 text-amber-400 hover:bg-amber-400 hover:text-black py-5 px-10 rounded-none transition-all duration-300 transform hover:scale-110 font-bold"
+                  onClick={() => window.location.href = '/auth/signin'}
+                >
+                  <User className="mr-2 h-6 w-6" />
+                  Sign In
+                </Button>
+              ) : (
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  className="border-2 border-amber-400 text-amber-400 hover:bg-amber-400 hover:text-black py-5 px-10 rounded-none transition-all duration-300 transform hover:scale-110 font-bold"
+                >
+                  <TrendingUp className="mr-2 h-6 w-6" />
+                  View Trends
+                </Button>
+              )}
             </div>
 
             {/* Luxury Stats - REDUCED */}
@@ -965,6 +1254,17 @@ export default function Dashboard() {
             <p className="text-xl opacity-90 mb-10 font-light leading-relaxed">
               Be the first to discover our latest luxury collections, exclusive offers, and VIP events. 
               Elevate your style with insider access.
+              {!isAuthenticated && (
+                <span className="block mt-4 text-lg text-amber-200">
+                  <button 
+                    onClick={() => window.location.href = '/auth/signin'} 
+                    className="underline hover:no-underline font-medium"
+                  >
+                    Sign in
+                  </button>
+                  {' '}to unlock exclusive member benefits and personalized recommendations.
+                </span>
+              )}
             </p>
             <div className="flex flex-col sm:flex-row gap-5 max-w-lg mx-auto">
               <input
@@ -984,3 +1284,4 @@ export default function Dashboard() {
     </div>
   );
 } 
+

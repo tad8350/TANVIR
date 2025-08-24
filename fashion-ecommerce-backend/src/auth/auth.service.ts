@@ -60,7 +60,7 @@ export class AuthService {
     };
   }
 
-  async register(email: string, password: string, user_type: string) {
+  async register(email: string, password: string, firstName: string, lastName: string, user_type: string = 'customer') {
     // Only allow customer registration publicly
     if (user_type !== 'customer') {
       throw new ForbiddenException('Only customers can register publicly. Admin and brand users must be created by administrators.');
@@ -72,11 +72,13 @@ export class AuthService {
       throw new ConflictException('User with this email already exists');
     }
 
-    // Create new user
+    // Create new user with first and last name
     const user = await this.usersService.create({
       email,
       password,
       user_type,
+      firstName,
+      lastName,
     });
 
     // Generate JWT token
@@ -249,7 +251,7 @@ export class AuthService {
     };
   }
 
-  async setupSuperAdmin(adminData: { email: string; password: string; name: string }) {
+  async setupSuperAdmin(adminData: { email: string; password: string; firstName: string; lastName: string }) {
     // Check if any admin exists
     const adminCount = await this.adminRepository.count();
     if (adminCount > 0) {
@@ -258,8 +260,9 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(adminData.password, 10);
     const admin = this.adminRepository.create({
-      ...adminData,
+      email: adminData.email,
       password: hashedPassword,
+      name: `${adminData.firstName} ${adminData.lastName}`, // Combine firstName and lastName
       role: 'super_admin',
       is_active: true
     });
@@ -280,7 +283,7 @@ export class AuthService {
     };
   }
 
-  async createAdmin(adminData: { email: string; password: string; name: string }) {
+  async createAdmin(adminData: { email: string; password: string; firstName: string; lastName: string }) {
     // Check if email already exists
     const existingAdmin = await this.adminRepository.findOne({
       where: { email: adminData.email }
@@ -292,8 +295,9 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(adminData.password, 10);
     const admin = this.adminRepository.create({
-      ...adminData,
+      email: adminData.email,
       password: hashedPassword,
+      name: `${adminData.firstName} ${adminData.lastName}`, // Combine firstName and lastName
       role: 'admin',
       is_active: true
     });

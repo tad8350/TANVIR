@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, user_type } = body;
+    const { email, password, user_type, firstName, lastName } = body;
 
-    if (!email || !password) {
+    if (!email || !password || !firstName || !lastName) {
       return NextResponse.json(
-        { message: 'Email and password are required' },
+        { message: 'Email, password, first name, and last name are required' },
         { status: 400 }
       );
     }
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call the backend API
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/auth/register`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -29,7 +29,9 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({ 
         email, 
         password, 
-        user_type: 'customer' // Force customer type
+        user_type: 'customer', // Force customer type
+        firstName,
+        lastName,
       }),
     });
 
